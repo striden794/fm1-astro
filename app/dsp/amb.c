@@ -3,6 +3,9 @@
 /* The instrument (amb.h). One compilation unit, -O2. */
 #include "amb.h"
 #include "fastmath.h"
+#ifdef EN_HOST
+#include <string.h>
+#endif
 
 #if defined EN_HOST || defined PLAT_HOST
 #define EN_POOL
@@ -1688,25 +1691,111 @@ static void render_drums(uint32_t n)
     render_hat(&drum[2], n, g * 0.14f, 1.0f, 0.7f);   /* open: a little left */
 }
 
+#ifdef EN_HOST
+/* TIDE: the harness's taps (amb.h). Each layer's part of the block is the difference it makes to the
+ * buses; the sums of squares go to the harness, which writes them out once a second. */
+double en_tap_dry[EN_TAP_NLAYERS], en_tap_rsend[EN_TAP_NLAYERS], en_tap_esend[EN_TAP_NLAYERS];
+double en_tap_echo, en_tap_plate;
+uint32_t en_tap_frames;
+static float tapl[BLK], tapr[BLK], taps[BLK], tape_[BLK];
+static void tap_begin(uint32_t n)
+{
+    memcpy(tapl, mixl, n * sizeof(float));
+    memcpy(tapr, mixr, n * sizeof(float));
+    memcpy(taps, rsend, n * sizeof(float));
+    memcpy(tape_, esend, n * sizeof(float));
+}
+static void tap_end(int k, uint32_t n)
+{
+    uint32_t j;
+    double d = 0.0, s = 0.0, e = 0.0;
+    for (j = 0; j < n; j++) {
+        double a = (double)(mixl[j] - tapl[j]), b = (double)(mixr[j] - tapr[j]);
+        double c = (double)(rsend[j] - taps[j]), f = (double)(esend[j] - tape_[j]);
+        d += a * a + b * b;
+        s += c * c;
+        e += f * f;
+    }
+    en_tap_dry[k] += d;
+    en_tap_rsend[k] += s;
+    en_tap_esend[k] += e;
+}
+void en_tap_reset(void)
+{
+    int k;
+    for (k = 0; k < EN_TAP_NLAYERS; k++)
+        en_tap_dry[k] = en_tap_rsend[k] = en_tap_esend[k] = 0.0;
+    en_tap_echo = en_tap_plate = 0.0;
+    en_tap_frames = 0;
+}
+int en_tap_param(int p) { return (p >= 0 && p < P_NPARAMS) ? par[p] : 0; }
+int en_tap_bells_on(void)
+{
+    int i, c = 0;
+    for (i = 0; i < NBELL; i++)
+        c += bell[i].on != 0;
+    return c;
+}
+int en_tap_drums_on(void)
+{
+    int i, c = 0;
+    for (i = 0; i < EN_NDRUM; i++)
+        c += drum[i].on != 0;
+    return c;
+}
+int en_tap_deg(void) { return deg; }
+int en_tap_loop_notes(void)
+{
+    int l, c = 0;
+    for (l = 0; l < EN_NLOOP; l++)
+        c += loop_count(l);
+    return c;
+}
+#define TAP_BEGIN(n) tap_begin(n)
+#define TAP_END(k, n) tap_end(k, n)
+#else
+#define TAP_BEGIN(n) ((void)0)
+#define TAP_END(k, n) ((void)0)
+#endif
+
 static void render_chunk(int32_t *out, uint32_t n, float gain)
 {
     uint32_t j;
     const float rg = rev_send * rev_in_gain * (1.0f - 0.25f * arcm), eg = echo_send;
     for (j = 0; j < n; j++)
         mixl[j] = mixr[j] = rsend[j] = esend[j] = 0.0f;
+    TAP_BEGIN(n);
     render_pad(n);
+    TAP_END(EN_TAP_PAD, n);
+    TAP_BEGIN(n);
     render_bass(n);
+    TAP_END(EN_TAP_BASS, n);
+    TAP_BEGIN(n);
     render_bells(n);
+    TAP_END(EN_TAP_BELLS, n);
+    TAP_BEGIN(n);
     render_drums(n);
+    TAP_END(EN_TAP_PULSE, n);
     for (j = 0; j < n; j++) {
         float wl, wr, l, r, el, er, xl, xr;
         echoes(esend[j] * eg, &el, &er, &xl, &xr);
         reverb((rsend[j] * rg + (el + er + xl + xr) * 0.35f * rev_send) * 0.8f, &wl, &wr);
+#ifdef EN_HOST
+        {
+            double a = (double)(0.75f * el + 0.3f * xl), b = (double)(0.75f * er + 0.3f * xr);
+            double c = (double)(1.3f * wl), d = (double)(1.3f * wr);
+            en_tap_echo += a * a + b * b;
+            en_tap_plate += c * c + d * d;
+        }
+#endif
         l = (mixl[j] + 0.75f * el + 0.3f * xl + 1.3f * wl) * 0.36f * gain;
         r = (mixr[j] + 0.75f * er + 0.3f * xr + 1.3f * wr) * 0.36f * gain;
         out[2 * j] = (int32_t)(fm_tanhf(l) * 8300000.0f);
         out[2 * j + 1] = (int32_t)(fm_tanhf(r) * 8300000.0f);
     }
+#ifdef EN_HOST
+    en_tap_frames += n;
+#endif
 }
 
 /* the arc: a slow tide, minutes long, between sparse (-1) and full (+1); Motion sets how far it goes */

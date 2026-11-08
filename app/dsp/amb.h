@@ -116,3 +116,21 @@ const char *en_chord_name(const int *pcs, int n, char *buf);   /* "Em7", "Dsus4"
 #define EN_NPIECES 8
 const char *en_piece_name(int i);
 void en_piece(int i, int16_t *par, uint16_t *pool);
+
+
+#ifdef EN_HOST
+/* TIDE: taps for the desktop render harness (tools/render.c), host builds only. Energy (sums of squares,
+ * L plus R, in the mix's float scale before the output gain) added since en_tap_reset(): each layer's dry
+ * part, its reverb send and its echo send, and the echoes' and the plate's returns. Nothing here is
+ * compiled for the device. */
+enum { EN_TAP_PAD, EN_TAP_BELLS, EN_TAP_BASS, EN_TAP_PULSE, EN_TAP_NLAYERS };
+extern double en_tap_dry[EN_TAP_NLAYERS], en_tap_rsend[EN_TAP_NLAYERS], en_tap_esend[EN_TAP_NLAYERS];
+extern double en_tap_echo, en_tap_plate;
+extern uint32_t en_tap_frames;
+void en_tap_reset(void);
+int en_tap_param(int p);                       /* a parameter as the engine has applied it */
+int en_tap_bells_on(void);                     /* bell voices sounding */
+int en_tap_drums_on(void);                     /* pulse voices sounding */
+int en_tap_deg(void);                          /* the chord's scale degree */
+int en_tap_loop_notes(void);                   /* notes held by the four loops together */
+#endif
