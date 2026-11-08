@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
+ * Copyright (C) 2026 Charles Vestal
+ * Copyright (C) 2026 Tomorrow's Man (TIDE) */
 /* The instrument: a generative ambient garden. Four layers draw on one pool of notes (a scale:
  * the root plus up to eleven more pitch classes) and one chord that drifts slowly through it:
  *
@@ -13,12 +14,15 @@
  *           quarter notes), each holding a short phrase that shifts against the others, each its own
  *           shade of bell. EVOLVE changes a note now and then; DENSITY sets how many notes a loop holds.
  *   BASS    a sine and its sub-octave on the chord's root (now and then its fifth), gliding.
- *   PULSE   a soft thump, a closed hat and an open hat, each on its own Euclidean pattern (16, 12 and 7
- *           sixteenths): polyrhythms. HITS sets how many; the patterns turn and change around it.
+ *   GROUND  (TIDE, in the pulse's place) a rare low drone on the chord's root, an octave under the bass,
+ *           in and out over a minute or two, a few minutes at a time.
  *
- * Over it all, the ARC: a slow tide, minutes long, between sparse (fewer bells, a darker vowel, a quieter
- * pulse, more reverb) and full; MOTION sets how far it goes. And rests: with EVOLVE, the pulse
- * sits out a few bars, the bass a chord, a bell loop a pass.
+ * Over it all (TIDE), the CONDUCTOR: walkers on four timescales (notes, cells, weather of minutes,
+ * seasons of hours) move the pad's voices, their breathing, the bells' count, the bass's and Ground's
+ * presence, the brightness, the register and the space; a governor holds the mix near the DENSITY
+ * target and lets no layer lead for long; nothing moves faster than the swell limit. DRIFT is the
+ * speed of all of it (fully down holds). AMB-1's arc and scheduled breath are gone; with EVOLVE a bell
+ * loop still changes a note or sits out a pass.
  * Then, after Discreet Music's chain, an Echoplex (160 ms, fed back) and a tape loop (to ~5.6 s, two
  * heads, each repeat darker), and Dattorro's plate (from FoMni), fed generously: the space is most of
  * what is heard.
@@ -90,7 +94,7 @@ extern volatile uint8_t en_chord[EN_NPAD];     /* the chord's notes (MIDI), pad 
 extern volatile uint8_t en_chord_root;         /* the chord's root, MIDI pitch class 0..11 */
 extern volatile uint8_t en_chord_n;            /* its distinct tones: 3 or 4 */
 extern volatile float en_drift;                /* 0..1: how far to the next chord */
-extern volatile float en_pad_level, en_bass_level;
+extern volatile float en_pad_level, en_bass_level, en_ground_level;
 extern volatile uint8_t en_loop_pos[EN_NLOOP];
 extern volatile int8_t en_loop_note[EN_NLOOP][EN_LOOP_MAX];   /* -1 rest, else the slot's offset */
 extern volatile float en_loop_glow[EN_NLOOP];  /* 0..1: a bell just rang from this loop */
@@ -98,10 +102,17 @@ extern volatile uint8_t en_drum_pos[EN_NDRUM];
 extern volatile uint32_t en_drum_pat[EN_NDRUM];/* bit i: a hit on step i */
 extern volatile float en_drum_glow[EN_NDRUM];
 extern volatile uint32_t en_bars;              /* sixteenths played since start (for tests) */
-extern volatile float en_arc;                  /* the arc, -1 sparse .. +1 full (times Motion) */
+extern volatile float en_arc;                  /* TIDE: the weather's density, -1 sparse .. +1 full */
 extern volatile uint8_t en_pulse_rest;         /* the pulse is sitting a few bars out */
 extern volatile uint8_t en_pad_note[EN_NPAD];  /* the note each voice sings now (MIDI) */
 extern volatile float en_pad_amp[EN_NPAD];     /* and how loud */
+/* TIDE: the conductor's state (walkers, the governor), for the screen and the harness */
+enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_PRES_BELLS, CD_PRES_BASS,
+       CD_PRES_GROUND, CD_S_SPEED, CD_S_DENSITY, CD_S_BRIGHT, CD_SPEED, CD_LEVEL20, CD_LEVEL60, CD_TARGET, CD_TRIM,
+       CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
+       CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, EN_NCOND };
+extern const char *const EN_COND_NAME[EN_NCOND];
+extern volatile float en_cond[EN_NCOND];
 
 /* the pure parts, for the tests and the screen */
 uint32_t en_euclid(int k, int n, int rot);     /* Bjorklund's pattern, as a bitmask (bit 0 = step 0) */
@@ -123,14 +134,16 @@ void en_piece(int i, int16_t *par, uint16_t *pool);
  * L plus R, in the mix's float scale before the output gain) added since en_tap_reset(): each layer's dry
  * part, its reverb send and its echo send, and the echoes' and the plate's returns. Nothing here is
  * compiled for the device. */
-enum { EN_TAP_PAD, EN_TAP_BELLS, EN_TAP_BASS, EN_TAP_PULSE, EN_TAP_NLAYERS };
+enum { EN_TAP_PAD, EN_TAP_BELLS, EN_TAP_BASS, EN_TAP_PULSE, EN_TAP_NLAYERS };   /* EN_TAP_PULSE: Ground */
 extern double en_tap_dry[EN_TAP_NLAYERS], en_tap_rsend[EN_TAP_NLAYERS], en_tap_esend[EN_TAP_NLAYERS];
 extern double en_tap_echo, en_tap_plate;
 extern uint32_t en_tap_frames;
 void en_tap_reset(void);
 int en_tap_param(int p);                       /* a parameter as the engine has applied it */
 int en_tap_bells_on(void);                     /* bell voices sounding */
-int en_tap_drums_on(void);                     /* pulse voices sounding */
+int en_tap_drums_on(void);                     /* Ground sounding (the pulse's slot) */
+int en_tap_pad_state(int i);                   /* a pad voice: 0 off, 1 singing, 2 dissolving */
+void en_host_mute(int layer, int on);          /* mute a layer's output after the governor has heard it (solo renders) */
 int en_tap_deg(void);                          /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
 #endif

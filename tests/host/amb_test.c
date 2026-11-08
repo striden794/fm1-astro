@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
+ * Copyright (C) 2026 Charles Vestal
+ * Copyright (C) 2026 Tomorrow's Man (TIDE: the conductor's rules) */
 /* The instrument on the host: the pure parts (Euclid, scales, chords, voice leading, names) and the
- * render (sound, no NaN, bounded, the loops evolve, the chord drifts, freeze holds). */
+ * render (sound, no NaN, bounded, the loops evolve, the chord moves, freeze holds). TIDE adds its rules:
+ * at most three pad voices sing, a voice enters only on a note of the chord, Drift at Hold holds, the
+ * governor keeps the mix near its target, and nothing sustained moves faster than the swell limit. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -67,6 +70,12 @@ static void run(float secs)
     }
 }
 
+static int cmpf(const void *a, const void *b)
+{
+    float x = *(const float *)a, y = *(const float *)b;
+    return x < y ? -1 : x > y;
+}
+
 int main(void)
 {
     int pcs[4], n, i;
@@ -125,9 +134,11 @@ int main(void)
     {
         char t[12];
         en_param_text(P_DRIFT, 0, t);
-        CHECK(!strcmp(t, "20s"), "drift 0: %s", t);
+        CHECK(!strcmp(t, "Hold"), "drift 0: %s", t);
+        en_param_text(P_DRIFT, 50, t);
+        CHECK(!strcmp(t, "1.00x"), "drift 50: %s", t);
         en_param_text(P_DRIFT, 100, t);
-        CHECK(!strcmp(t, "5:00"), "drift 100: %s", t);
+        CHECK(!strcmp(t, "4.00x"), "drift 100: %s", t);
         en_param_text(P_ETIME, 3, t);
         CHECK(!strcmp(t, "1 bar"), "etime: %s", t);
         en_param_text(P_BOCT, 1, t);
@@ -146,55 +157,56 @@ int main(void)
     printf("  20 s playing: peak %.3f, rms %.4f, bars %u\n", (double)peak,
            (double)sqrtf(sum2 / (20.0f * 44100.0f * 2.0f)), en_bars / 16u);
     CHECK(en_bars / 16u >= 5u, "the grid ran (%u sixteenths)", en_bars);
-    CHECK(en_pad_level > 0.5f, "the pad swelled (%f)", (double)en_pad_level);
+    CHECK(en_pad_level > 0.25f, "the pad came in (%f)", (double)en_pad_level);
 
-    /* the chord drifts: with Drift at its shortest, a few changes in two minutes */
+    /* the chord moves: with Drift at its fastest (4x), a few changes in five minutes */
     {
         int changes = 0, last = en_chord_root * 16 + en_chord[0] % 16, k;
-        en_set(P_DRIFT, 0);
-        for (k = 0; k < 120; k++) {
+        en_set(P_DRIFT, 100);
+        for (k = 0; k < 300; k++) {
             int now;
             run(1.0f);
             now = en_chord_root * 16 + en_chord[0] % 16;
             changes += now != last;
             last = now;
         }
-        CHECK(changes >= 3, "chord changes in 2 min at Drift 0: %d", changes);
-        printf("  chord changes in 2 min: %d\n", changes);
+        CHECK(changes >= 2, "chord changes in 5 min at Drift 100: %d", changes);
+        printf("  chord changes in 5 min at Drift 100: %d\n", changes);
     }
 
-    /* a chord change is heard: within 2 s no sounding voice sings a note outside the new chord */
+    /* TIDE: a voice enters only on a note of the chord (a voice already singing is never bent: it
+     * dissolves); never more than three sing at once */
     {
-        int k, i, bad_s = 0, changes = 0, last = -1;
-        en_set(P_DRIFT, 0);
-        for (k = 0; k < 90 * 4; k++) {
-            int sig = en_chord[0] | en_chord[1] << 7 | en_chord[2] << 14 | en_chord[3] << 21;
-            static int since = -1;
+        int k, i, off_chord = 0, entries = 0, over = 0;
+        float prev[EN_NPAD];
+        for (i = 0; i < EN_NPAD; i++)
+            prev[i] = en_pad_amp[i];
+        for (k = 0; k < 480 * 4; k++) {
+            uint32_t pcs = 0;
             run(0.25f);
-            if (sig != last) {
-                if (last >= 0) {
-                    changes++;
-                    since = 0;
+            for (i = 0; i < EN_NPAD; i++)
+                pcs |= 1u << (en_chord[i] % 12);
+            for (i = 0; i < EN_NPAD; i++) {
+                if (prev[i] < 0.1f && en_pad_amp[i] >= 0.1f) {   /* rising through 0.1: an entrance */
+                    entries++;
+                    if (!(pcs >> (en_pad_note[i] % 12) & 1u))
+                        off_chord++;
                 }
-                last = sig;
-            } else if (since >= 0 && ++since == 8) {   /* 2 s after a change */
-                uint32_t pcs = 0;
-                for (i = 0; i < EN_NPAD; i++)
-                    pcs |= 1u << (en_chord[i] % 12);
-                for (i = 0; i < EN_NPAD; i++)
-                    if (en_pad_amp[i] > 0.05f && !(pcs >> (en_pad_note[i] % 12) & 1u))
-                        bad_s++;
-                since = -1;
+                prev[i] = en_pad_amp[i];
             }
+            over += en_cond[CD_PAD_VOICES] > 3.0f;
         }
-        CHECK(changes >= 3, "chord changes in 90 s at Drift 0: %d", changes);
-        CHECK(!bad_s, "%d voices still off the new chord 2 s after a change", bad_s);
+        CHECK(entries >= 2, "pad entrances in 8 min: %d", entries);
+        CHECK(!off_chord, "%d of %d entrances on a note outside the chord", off_chord, entries);
+        CHECK(!over, "more than three pad voices singing at %d moments", over);
+        printf("  pad entrances in 8 min: %d\n", entries);
     }
 
     /* the loops evolve: with Evolve at 100, the phrases change */
     {
         int8_t before[EN_NLOOP][EN_LOOP_MAX];
         int diff = 0, l;
+        en_set(P_DRIFT, 50);
         en_set(P_EVOLVE, 100);
         en_set(P_DENSITY, 80);
         memcpy(before, (const void *)en_loop_note, sizeof before);
@@ -211,6 +223,7 @@ int main(void)
     /* freeze: the chord holds */
     {
         int held = en_chord[0] + 128 * en_chord[1], k;
+        en_set(P_DRIFT, 100);
         en_freeze(1);
         for (k = 0; k < 60; k++) {
             run(1.0f);
@@ -219,8 +232,33 @@ int main(void)
         en_freeze(0);
     }
 
+    /* TIDE: Drift at Hold holds the weather, the chord and the cells; the music goes on */
+    {
+        int8_t before[EN_NLOOP][EN_LOOP_MAX];
+        float w0[EN_NCOND];
+        int held, k, diff = 0, l, moved = 0;
+        en_set(P_DRIFT, 0);
+        run(2.0f);
+        held = en_chord[0] + 128 * en_chord[1];
+        memcpy(before, (const void *)en_loop_note, sizeof before);
+        for (k = 0; k < EN_NCOND; k++)
+            w0[k] = en_cond[k];
+        peak = 0.0f;
+        run(180.0f);
+        CHECK(en_chord[0] + 128 * en_chord[1] == held, "the chord moved at Hold");
+        for (l = 0; l < EN_NLOOP; l++)
+            for (i = 0; i < EN_LOOP_MAX; i++)
+                diff += before[l][i] != en_loop_note[l][i];
+        CHECK(diff == 0, "the cells changed %d notes at Hold", diff);
+        for (k = CD_BRIGHT; k <= CD_S_BRIGHT; k++)
+            moved += fabsf(en_cond[k] - w0[k]) > 1e-6f;
+        CHECK(moved == 0, "%d walkers moved at Hold", moved);
+        CHECK(peak > 0.02f, "silent at Hold (%f)", (double)peak);
+        en_set(P_DRIFT, 25);
+    }
+
     /* a new key while playing (a piece, the root, the scale): within 3 s no voice still sings the old
-     * chord (a voice only takes its note at its next breath otherwise, up to a minute later) */
+     * chord (a voice otherwise only takes a new note as it enters) */
     {
         int k, stale = 0;
         en_freeze(0);
@@ -294,13 +332,103 @@ int main(void)
         }
         CHECK(zc[1] > 2.5f * zc[0], "Bell tone 100 not brighter: %.0f vs %.0f", (double)zc[1], (double)zc[0]);
         CHECK(zc[2] > 1.8f * zc[0], "Bell oct +2 not higher: %.0f vs %.0f", (double)zc[2], (double)zc[0]);
+    }
+
+    /* TIDE: the governor and the swell limit. The pad alone (the other layers' levels at zero), the
+     * default piece, 15 minutes: after the opening, the pad's 3 s level (its reverb included, floored
+     * 30 dB under its median) never moves faster than 1 dB/s nor 1.5 dB in 2 s; and the governor's
+     * 20 s level sits within 4 dB of its target by the end. */
+    {
+        enum { SECS = 900, START = 120 };
+        static float lv[SECS];
+        static float d1[SECS], d2[SECS];
+        float e, med, floor_db, m1 = 0.0f, m2 = 0.0f, p1, p2;
+        int s, n1 = 0, n2 = 0;
+        FILE *dump = fopen("app/build/tests/padalone.txt", "w");   /* per second: the level and the voices */
+        en_init();
+        en_set(P_BELLS, 0);
+        en_set(P_BASS, 0);
+        en_set(P_PULSE, 0);
+        en_play(1);
+        for (s = 0; s < SECS; s++) {
+            double fr;
+            sum2 = 0.0f;
+            en_tap_reset();
+            run(1.0f);
+            fr = 2.0 * (double)en_tap_frames + 1e-9;
+            e = sum2 / (44100.0f * 2.0f);
+            lv[s] = 10.0f * log10f(e + 1e-12f);
+            if (dump)
+                fprintf(dump, "%d %.1f [dry %.1f rsend %.1f plate %.1f echo %.1f] %.3f/%d %.3f/%d %.3f/%d %.3f/%d  voices %.0f trim %.1f gain %.1f\n",
+                        s, (double)lv[s], 10.0 * log10(en_tap_dry[0] / fr + 1e-12), 10.0 * log10(2.0 * en_tap_rsend[0] / fr + 1e-12),
+                        10.0 * log10(en_tap_plate / fr + 1e-12), 10.0 * log10(en_tap_echo / fr + 1e-12),
+                        (double)en_pad_amp[0], en_pad_note[0], (double)en_pad_amp[1], en_pad_note[1],
+                        (double)en_pad_amp[2], en_pad_note[2], (double)en_pad_amp[3], en_pad_note[3],
+                        (double)en_cond[CD_PAD_VOICES], (double)en_cond[CD_TRIM], (double)en_cond[CD_GAIN_PAD]);
+        }
+        if (dump)
+            fclose(dump);
+        for (s = 2; s < SECS; s++) {              /* the 3 s level */
+            float a = powf(10.0f, lv[s] * 0.1f), b = powf(10.0f, lv[s - 1] * 0.1f), c = powf(10.0f, lv[s - 2] * 0.1f);
+            d1[s] = 10.0f * log10f((a + b + c) * (1.0f / 3.0f) + 1e-12f);
+        }
+        memcpy(d2, d1 + START, (SECS - START) * sizeof(float));
+        qsort(d2, SECS - START, sizeof(float), cmpf);
+        med = d2[(SECS - START) / 2];
+        floor_db = med - 30.0f;
+        for (s = START; s < SECS; s++)
+            if (d1[s] < floor_db)
+                d1[s] = floor_db;
+        for (s = START + 1; s < SECS; s++) {
+            float r = fabsf(d1[s] - d1[s - 1]);
+            d2[n1++] = r;
+            if (r > m1) {
+                m1 = r;
+                n = s;
+            }
+        }
+        if (m1 > 1.0f) {
+            printf("  fastest move at %d s (median level %.1f): ", n, (double)med);
+            for (s = n - 4; s <= n + 2 && s < SECS; s++)
+                printf("%.1f ", (double)d1[s]);
+            printf("\n");
+        }
+        qsort(d2, n1, sizeof(float), cmpf);
+        p1 = d2[(int)(0.999f * (float)n1)];
+        for (s = START + 2; s < SECS; s++) {
+            float r = fabsf(d1[s] - d1[s - 2]);
+            d2[n2++] = r;
+            if (r > m2)
+                m2 = r;
+        }
+        qsort(d2, n2, sizeof(float), cmpf);
+        p2 = d2[(int)(0.999f * (float)n2)];
+        printf("  pad alone, 15 min: 3 s level moves %.2f dB/s (max %.2f), %.2f dB in 2 s (max %.2f) at p99.9; "
+               "governor level %.1f dB, trim %.1f\n", (double)p1, (double)m1, (double)p2, (double)m2,
+               (double)en_cond[CD_LEVEL20], (double)en_cond[CD_TRIM]);
+        CHECK(p1 <= 1.0f, "the pad's level moved %.2f dB/s (limit 1.0)", (double)p1);
+        CHECK(p2 <= 1.5f, "the pad's level moved %.2f dB in 2 s (limit 1.5)", (double)p2);
+        CHECK(!bad, "NaN");
+        /* the whole garden, 12 minutes: the governor holds the mix near its target */
         en_init();
         en_play(1);
+        run(12.0f * 60.0f);
+        printf("  the garden, 12 min: governor level %.1f dB, target %.1f, trim %.1f, shares %.0f/%.0f/%.0f/%.0f%%, "
+               "gains %.1f/%.1f/%.1f/%.1f dB\n",
+               (double)en_cond[CD_LEVEL20], (double)en_cond[CD_TARGET], (double)en_cond[CD_TRIM],
+               (double)(100.0f * en_cond[CD_SHARE_PAD]), (double)(100.0f * en_cond[CD_SHARE_BELLS]),
+               (double)(100.0f * en_cond[CD_SHARE_BASS]), (double)(100.0f * en_cond[CD_SHARE_GROUND]),
+               (double)en_cond[CD_GAIN_PAD], (double)en_cond[CD_GAIN_BELLS], (double)en_cond[CD_GAIN_BASS],
+               (double)en_cond[CD_GAIN_GROUND]);
+        CHECK(fabsf(en_cond[CD_LEVEL20] - en_cond[CD_TARGET]) <= 3.0f, "the governor is %.1f dB off its target",
+              (double)(en_cond[CD_LEVEL20] - en_cond[CD_TARGET]));
+        CHECK(!bad, "NaN");
     }
 
     /* stop: the tails die away */
     for (i = 0; i < P_NPARAMS; i++)
         en_set(i, en_param_info(i)->def);
+    run(30.0f);
     en_play(0);
     run(40.0f);
     peak = 0.0f;

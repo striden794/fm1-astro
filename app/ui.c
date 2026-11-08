@@ -1058,31 +1058,21 @@ static int sp_same(const char *a, const char *b)
     return *a == *b;
 }
 
-/* a value as it is said: Drift in minutes and seconds (the screen's "1:05", "45s"), the rest as shown */
+/* a value as it is said: Drift as a speed ("0.50x" is "0.50 times"; "Hold" as it is), the rest as shown */
 static void sp_value(int k)
 {
     char t[16];
+    uint32_t i;
     knob_text(k, t);
-    if (k == P_DRIFT) {
-        uint32_t m = 0, s = 0, i;
-        for (i = 0; t[i] >= '0' && t[i] <= '9'; i++)
-            s = s * 10u + (uint32_t)(t[i] - '0');
-        if (t[i] == ':') {
-            m = s;
-            s = 0;
-            for (i++; t[i] >= '0' && t[i] <= '9'; i++)
-                s = s * 10u + (uint32_t)(t[i] - '0');
+    if (k == P_DRIFT) {                          /* TIDE: Drift is the weather's speed */
+        for (i = 0; t[i] && t[i] != 'x'; i++)
+            ;
+        if (t[i] == 'x') {
+            t[i] = 0;
+            sp_cat(t);
+            sp_cat(" times");
+            return;
         }
-        if (m) {
-            sp_int(m);
-            sp_cat(m == 1u ? " minute" : " minutes");
-            if (!s)
-                return;
-            sp_cat(" ");
-        }
-        sp_int(s);
-        sp_cat(s == 1u ? " second" : " seconds");
-        return;
     }
     sp_cat(t);
 }

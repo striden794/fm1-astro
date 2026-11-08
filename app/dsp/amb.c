@@ -1,10 +1,21 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
-/* The instrument (amb.h). One compilation unit, -O2. */
+ * Copyright (C) 2026 Charles Vestal
+ * Copyright (C) 2026 Tomorrow's Man (TIDE: the conductor, the governor, the Ground layer) */
+/* The instrument (amb.h). One compilation unit, -O2.
+ *
+ * TIDE, Phase 3: AMB-1's control layer (the arc, the pad's scheduled breath, the 1 s hand-offs, the chord
+ * drift timer, the pulse) is replaced by the conductor in DESIGN.md: walkers on four timescales, the pad as
+ * a layer that enters, breathes on summed random walks, dissolves and rests, an energy governor that
+ * listens to the mix and each layer's share, global rate limits, and Ground, a rare low drone in the
+ * pulse's place. The sounds (voices, bells, bass, echo, plate) are AMB-1's, unchanged. */
 #include "amb.h"
 #include "fastmath.h"
 #ifdef EN_HOST
 #include <string.h>
+#endif
+
+#ifndef EN_PULSE
+#define EN_PULSE 0                              /* AMB-1's Euclidean pulse: kept, not compiled (TESTING #9) */
 #endif
 
 #if defined EN_HOST || defined PLAT_HOST
@@ -38,7 +49,9 @@ static const en_param_t PARAMS[P_NPARAMS] = {
 const en_param_t *en_param_info(int i) { return (i >= 0 && i < P_NPARAMS) ? &PARAMS[i] : &PARAMS[0]; }
 
 /* the pieces: eight recipes for the whole garden (the FM-1's PRESETS, the web app's cards). Tune and
- * MIDI out are taken from here by neither: they belong to the player, not the piece */
+ * MIDI out are taken from here by neither: they belong to the player, not the piece.
+ * TIDE reads them as: Pulse = the Ground layer's level; Drift = the weather's speed (0 holds, 50 = 1x);
+ * Swell = how far the pad voices breathe; Hits, Swing, Hats: unused (the pulse is not played). */
 /*                     Pad Bel Bas Pul  Den Evo Dri Hit  Ech ET Rev Siz  Bri Swe Ton Mot  Tun MI Tem Rt Md Oc  PT  BO Gli Fif  Swi Hat
  * (PT: the pad's colour, 0 Rhodes, 1 Voices; BO: the bass's octave) */
 static const struct {
@@ -86,7 +99,8 @@ static char *itoa_s(int v, char *b)
     return b;
 }
 
-static float drift_secs(int v) { return 20.0f * fm_exp2f((float)v * 0.039069f); }   /* 20 s .. 5 min */
+/* TIDE: Drift is the weather's speed: 0 holds everything, 50 is 1x, 25 half, 100 four times */
+static float drift_speed(int v) { return v <= 0 ? 0.0f : fm_exp2f((float)(v - 50) * 0.04f); }
 
 void en_param_text(int i, int v, char *b)
 {
@@ -102,6 +116,8 @@ void en_param_text(int i, int v, char *b)
         s = EN_MODE_NAME[(unsigned)v < EN_NMODES ? v : 0];
     else if (i == P_ROOT)
         s = EN_NOTE_NAME[(unsigned)v < 12u ? v : 0];
+    else if (i == P_DRIFT && v <= 0)
+        s = "Hold";
     if (s) {
         int k = 0;
         while (s[k] && k < 9) {
@@ -111,19 +127,14 @@ void en_param_text(int i, int v, char *b)
         b[k] = 0;
         return;
     }
-    if (i == P_DRIFT) {
-        int sec = (int)(drift_secs(v) + 0.5f);
-        if (sec < 60) {
-            b = itoa_s(sec, b);
-            *b++ = 's';
-            *b = 0;
-        } else {
-            b = itoa_s(sec / 60, b);
-            *b++ = ':';
-            *b++ = (char)('0' + sec % 60 / 10);
-            *b++ = (char)('0' + sec % 10);
-            *b = 0;
-        }
+    if (i == P_DRIFT) {                          /* the speed, as "0.50x" */
+        int h = (int)(drift_speed(v) * 100.0f + 0.5f);
+        b = itoa_s(h / 100, b);
+        *b++ = '.';
+        *b++ = (char)('0' + h % 100 / 10);
+        *b++ = (char)('0' + h % 10);
+        *b++ = 'x';
+        *b = 0;
         return;
     }
     if (i == P_SWING) {                          /* as a swing percentage: 50% (straight) .. 75% */
@@ -303,7 +314,7 @@ void en_regrow(void) { post(C_REGROW, 0, 0); }
 /* -------------------------------------------------------------- state --- */
 volatile uint8_t en_playing, en_frozen, en_ext;
 volatile uint8_t en_chord[EN_NPAD], en_chord_root, en_chord_n;
-volatile float en_drift, en_pad_level, en_bass_level;
+volatile float en_drift, en_pad_level, en_bass_level, en_ground_level;
 volatile uint8_t en_loop_pos[EN_NLOOP];
 volatile int8_t en_loop_note[EN_NLOOP][EN_LOOP_MAX];
 volatile float en_loop_glow[EN_NLOOP];
@@ -315,6 +326,12 @@ volatile float en_arc;
 volatile uint8_t en_pulse_rest;
 volatile uint8_t en_pad_note[EN_NPAD];
 volatile float en_pad_amp[EN_NPAD];
+volatile float en_cond[EN_NCOND];
+const char *const EN_COND_NAME[EN_NCOND] = {
+    "bright", "density", "register", "space", "chord", "pres_pad", "pres_bells", "pres_bass", "pres_ground",
+    "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
+    "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
+    "pad_target", "pad_voices", "ground", "opening"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told */
@@ -334,6 +351,10 @@ static uint32_t rnd(void)                       /* Marsaglia's xorshift (Xorshif
 }
 static float frand(void) { return (float)(rnd() >> 8) * (1.0f / 16777216.0f); }
 static int irand(int n) { return n > 0 ? (int)((rnd() >> 8) % (uint32_t)n) : 0; }
+static float gauss(void)                        /* about N(0, 1): four uniforms summed (Irwin-Hall), scaled */
+{
+    return (frand() + frand() + frand() + frand() - 2.0f) * 1.7320508f;
+}
 
 static void midi(uint32_t st, uint32_t d1, uint32_t d2)
 {
@@ -355,6 +376,7 @@ static inline float sine(float ph)              /* ph in turns, any value >= 0 *
 }
 
 /* ------------------------------------------------- slow random motion --- */
+/* AMB-1's tape wobbles (Motion): pitch, vowel, pan, the echo heads. Small, fast and zero-mean; kept. */
 #define NMOD 9                                  /* 0..5 the pads', 6..8 the echo's */
 #define NMOD_PAD 6
 static struct {
@@ -367,7 +389,9 @@ static void mods_step(uint32_t n)
     int i;
     for (i = 0; i < NMOD; i++) {
         if (mod[i].left <= n) {
-            float secs = 7.0f + 33.0f * frand();
+            /* TIDE: the pad's wobbles (pitch, vowel, pan) four times slower than AMB-1's 7..40 s: a held
+             * note's pitch drifting across the plate's ripples was a swell by itself */
+            float secs = i < NMOD_PAD ? 28.0f + 132.0f * frand() : 7.0f + 33.0f * frand();
             mod[i].tgt = frand() * 2.0f - 1.0f;
             mod[i].left = (uint32_t)(secs * EN_SR);
             mod[i].rate = (float)n / (secs * EN_SR * 0.5f);
@@ -379,41 +403,79 @@ static void mods_step(uint32_t n)
 }
 static float motion;                            /* 0..1: Motion */
 
+/* ------------------------------------------------------ TIDE: walkers --- */
+/* Every evolving value is a walker (DESIGN section 2): an Ornstein-Uhlenbeck process that wanders with a
+ * standard deviation sd around its center and is drawn back on a timescale tau (seconds at Drift 1x),
+ * clamped to lo..hi. The conductor steps them every CTRL_N samples; speed multiplies time (0 holds). */
+#define CTRL_N 2048u                            /* 46 ms: the conductor's step */
+#define CTRL_DT ((float)CTRL_N / EN_SR)
+typedef struct {
+    float x, center, tau, sd, lo, hi;
+} walker_t;
+
+static void walker_set(walker_t *w, float center, float tau, float sd, float lo, float hi)
+{
+    w->center = center;
+    w->tau = tau;
+    w->sd = sd;
+    w->lo = lo;
+    w->hi = hi;
+    w->x = fm_clampf(center + 0.5f * sd * gauss(), lo, hi);   /* start near its center; it strays from there */
+}
+
+static void walk(walker_t *w, float speed)
+{
+    float a;
+    if (speed <= 0.0f)
+        return;
+    a = fm_minf(CTRL_DT * speed / w->tau, 1.0f);
+    w->x += (w->center - w->x) * a + w->sd * fm_sqrtf(2.0f * a) * gauss();
+    w->x = fm_clampf(w->x, w->lo, w->hi);
+}
+
+/* a rate-limited move in dB (the global rate limits, DESIGN section 6) */
+static float slew(float x, float tgt, float up, float down, float dt)
+{
+    float d = tgt - x, m = (d > 0.0f ? up : down) * dt;
+    if (d > m)
+        d = m;
+    else if (d < -m)
+        d = -m;
+    return x + d;
+}
+
 /* ---------------------------------------------------------------- pad --- */
-/* Breathing voices, as the sung tape loops of Music for Airports' "2/1": each voice swells in, hangs
- * and fades on its own cycle (unequal lengths, set by Swell), taking its note of the chord as it
- * starts, so the chord forms and dissolves rather than sitting there. The timbre: two saws a few
- * cents apart through two formant band-passes, a vowel that Bright moves from "oo" through "ah" to
- * "eh", with a little of the first formant's low-pass for body. */
+/* Four voices, as the sung tape loops of Music for Airports' "2/1", but as a layer, not a bed: the
+ * conductor asks for 0..3 of them. A voice enters at the swell limit on its note of the chord, breathes
+ * on three summed walkers at unrelated rates (no two crests alike), stays a minute or four, then
+ * dissolves more slowly than it came and rests. A chord change never bends a sounding note: a voice off
+ * the new chord dissolves and comes back on a new one. The timbre: two saws a few cents apart through two
+ * formant band-passes (Voices), or an FM Rhodes, as AMB-1. */
+enum { PV_OFF, PV_ON, PV_OUT };
 typedef struct {
     float ph[2], inc[2];
-    float note, target;                         /* MIDI: the note of this breath, the next one's */
-    float t, rate, peak, amp;                   /* t 0..1 through the breath, per 32 samples */
+    float note, target;                         /* MIDI: the note sung, the next one's */
+    float amp;                                  /* the amplitude, smoothed per sample */
+    float lin;                                  /* the conductor's amplitude for it (0..1), per step */
+    float ldb, base_db;                         /* its level in dB (slewed) and this stay's resting level */
+    float rise, fall;                           /* dB/s: in and while singing, dissolving */
+    float stay, rest;                           /* seconds left singing; seconds before it may enter again */
+    float crest;                                /* 0..1: how far above its base it is (brightness follows) */
+    float vowel, idx;                           /* the vowel's place (0..1) and the Rhodes index, rate-limited */
+    walker_t lw[3], bw;                         /* level walkers; a brightness offset */
     float ic[4];                                /* the two filters' states */
     float c1[4], c2[4];                         /* their coefficients: a1, a2, a3, k */
     float vib, pan;
     float hf;                                   /* a handoff's fade: 1 normal */
     uint8_t midi_note, hand;                    /* hand: 1 fading out of the old key, 2 into the new */
-    uint8_t voices;                             /* this breath's colour: 0 Rhodes, 1 Voices */
+    uint8_t voices;                             /* this stay's colour: 0 Rhodes, 1 Voices */
+    uint8_t st;                                 /* PV_* */
 } pad_t;
 static pad_t pad[EN_NPAD];
 static float pad_gate, pad_gain, pad_vol, bright, swell;
 static const float PAD_PAN[EN_NPAD] = {-0.55f, -0.18f, 0.18f, 0.55f};
-static const float BREATH[EN_NPAD] = {1.0f, 1.21f, 1.43f, 1.67f};    /* unequal cycles, as 2/1's 12..20 s loops */
-static const float START_T[EN_NPAD] = {0.0f, 0.9f, 0.82f, 0.95f};    /* the first breaths overlap */
+static const float VOICE_K[EN_NPAD] = {1.0f, 1.13f, 0.89f, 1.21f};   /* each voice's walkers a little apart */
 static const float VOWEL[4][2] = {{320.0f, 800.0f}, {480.0f, 900.0f}, {730.0f, 1090.0f}, {530.0f, 1840.0f}};
-static float arcm;                              /* the slow arc, -1 sparse .. +1 full, times Motion */
-
-static float breath(float t)                    /* rise, hang, fall, a short rest */
-{
-    if (t < 0.4f)
-        return 0.5f - 0.5f * fm_cosf(FM_PI * t * 2.5f);
-    if (t < 0.55f)
-        return 1.0f;
-    if (t < 0.9f)
-        return 0.5f + 0.5f * fm_cosf(FM_PI * (t - 0.55f) * (1.0f / 0.35f));
-    return 0.0f;
-}
 
 static void svf_coefs(float *c, float f, float k)
 {
@@ -424,39 +486,95 @@ static void svf_coefs(float *c, float f, float k)
     c[3] = k;
 }
 
-static void midi(uint32_t st, uint32_t d1, uint32_t d2);
-static void pad_breathe(pad_t *v, int i)        /* a new breath: its length, its strength, its note */
+/* ------------------------------------------------------ TIDE: the conductor's state --- */
+enum { L_PAD, L_BELLS, L_BASS, L_GROUND, NLAYERS };
+static struct {
+    walker_t s_speed, s_density, s_bright;      /* seasons (hours): how fast the weather moves, its density
+                                                 * and brightness centers */
+    walker_t bright, density, reg, space, chord;/* weather (minutes): the pad's tone, how many notes, the
+                                                 * pad's register, the space, how long chords dwell */
+    walker_t pres[NLAYERS];                     /* weather: each layer's presence */
+    float speed;                                /* Drift: time's multiplier; 0 holds */
+    float wspeed;                               /* the weather's: speed times the season's */
+    float dens, br;                             /* the combined density and brightness deviations */
+    float opening;                              /* seconds of a quicker start left (from silence) */
+    /* the governor */
+    float e_dry[NLAYERS], e_plate, e_echo;      /* energy since the last step (sums of squares, L and R) */
+    uint32_t frames;
+    float e20[NLAYERS], m3, m20, m60;           /* smoothed: each layer, the mix */
+    float level20, level60, target;             /* dB */
+    float trim, bias[NLAYERS], gdb[NLAYERS], g[NLAYERS];   /* the trim, each layer's bias, their slewed sum, linear */
+    float share[NLAYERS], lead[NLAYERS];        /* each layer's share of the energy; seconds over the cap */
+    uint8_t pad_thin;                           /* the pad has led too long: one voice fewer */
+    /* the pad */
+    int pad_target;
+    float since_entry;                          /* seconds since a voice entered */
+    uint32_t acc;                               /* samples toward the next step */
+} cd;
+static float ground_db = -60.0f, ground_lin;    /* the Ground layer's level */
+static uint8_t ground_on;
+static float ground_gap;                        /* seconds before Ground may enter again; its stay */
+static float ground_stay;
+static float ground_due;                        /* weather seconds since it last left; when it is overdue (40-70 min)
+                                                 * its presence is called up, so a rare layer is not an absent one */
+static float ground_due_at;
+
+/* a voice takes its note (an entry, or a hand-off's second half) */
+static void pad_note_on(pad_t *v, int i)
 {
-    float secs = (4.0f + 0.12f * swell) * BREATH[i] * (0.85f + 0.3f * frand());
-    v->rate = 32.0f / (secs * EN_SR);
-    v->peak = 0.6f + 0.4f * frand();
+    (void)i;
     if (en_playing && v->midi_note)
         midi(0x80, v->midi_note, 0);
     v->note = v->target;
     v->voices = (uint8_t)(par[P_PADTONE] != 0);
     v->midi_note = (uint8_t)v->target;
     if (en_playing)
-        midi(0x90, v->midi_note, (uint32_t)(50.0f + 40.0f * v->peak));
+        midi(0x90, v->midi_note, (uint32_t)(50.0f + 40.0f * fm_db2lin(v->base_db)));
 }
 
-/* a new key (piece, root, scale): the voices still singing the old one fade out in about a second and
- * breathe again on the new chord; a voice at rest just takes its new note. Chord drift doesn't do
- * this: there the old notes are meant to hang over */
+static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floor, at the swell limit */
+{
+    int k;
+    /* its size: scaled by the governor's headroom (the target less the mix's level now), -14..0 dB */
+    v->base_db = fm_clampf(-6.0f + 4.0f * frand() + 0.8f * (cd.target - cd.level20), -14.0f, 0.0f);
+    v->stay = 60.0f + 240.0f * frand();
+    v->rise = 0.4f;                             /* with the governor's 0.16 dB/s this stays under the swell limit;
+                                                 * the opening (play from silence) is quicker */
+    v->fall = 0.2f + 0.1f * frand();            /* dissolving: 1.3 to 2 times slower than it came */
+    v->ldb = cd.opening > 0.0f ? -12.0f : v->st == PV_OUT ? fm_maxf(v->ldb, -45.0f) : -45.0f;
+    v->crest = 0.0f;
+    v->vowel = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x, 0.0f, 1.0f);   /* enters where the weather is */
+    v->idx = 0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f);
+    v->hf = 1.0f;
+    v->hand = 0;
+    v->st = PV_ON;
+    for (k = 0; k < 3; k++)                     /* a fresh breath: the walkers start near their centers */
+        v->lw[k].x = fm_clampf(0.5f * v->lw[k].sd * gauss(), v->lw[k].lo, v->lw[k].hi);
+    pad_note_on(v, i);
+    cd.since_entry = 0.0f;
+    if (cd.trim > 0.0f)                         /* the governor hears it coming: a raised trim gives 3 dB back now */
+        cd.trim = fm_maxf(cd.trim - 3.0f, 0.0f);
+}
+
+/* a new key (piece, root, scale, colour) from the player: the voices still singing the old one cross
+ * over in about a second to their notes of the new chord (AMB-1's hand-off; the engine's own changes
+ * never do this: there a voice dissolves and comes back) */
 #define HAND_STEP (32.0f / (1.0f * EN_SR))
 static void pad_handoff(void)
 {
     int i;
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
-        if (v->amp > 0.002f && ((float)v->midi_note != v->target || v->voices != (par[P_PADTONE] != 0)))
-            v->hand = 1;
-        else if (!v->hand)
+        if (v->st != PV_OFF && v->amp > 0.002f &&
+            ((float)v->midi_note != v->target || v->voices != (par[P_PADTONE] != 0)))
+            v->hand = 1;                        /* singing: crosses over; dissolving: goes out with the old key */
+        else if (v->st == PV_OFF && !v->hand)
             v->note = v->target;
     }
 }
 
-/* a chord change: a voice singing a note the new chord doesn't have fades out in about a second and
- * breathes in on its new note; a voice on a shared note holds it to the end of its breath */
+/* a chord change: a voice singing a note the new chord doesn't have dissolves (never bent); a voice on a
+ * shared note holds it to the end of its stay */
 static void pad_leave(void)
 {
     int i, k;
@@ -465,24 +583,36 @@ static void pad_leave(void)
         int pc = v->midi_note % 12, shared = 0;
         for (k = 0; k < chord_nt; k++)
             shared |= chord_pcs[k] == pc;
-        if (v->amp > 0.002f && !shared && !v->hand)
-            v->hand = 1;
-        else if (v->amp <= 0.002f && !v->hand)
+        if (v->st == PV_ON && !shared && !v->hand)
+            v->st = PV_OUT;
+        else if (v->st == PV_OFF)
             v->note = v->target;
     }
 }
 
-static void pad_coefs(pad_t *v, int i)          /* every 32 samples: the breath, pitch, the vowel */
+static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off, pitch, the vowel */
 {
-    float f, vw, f1, f2;
+    float f, vw, f1, f2, b;
     int a;
     if (v->hand == 1) {                         /* out of the old key */
         v->hf -= HAND_STEP;
         if (v->hf <= 0.0f) {
+            if (v->st == PV_OUT) {              /* it was dissolving anyway: gone */
+                v->st = PV_OFF;
+                v->lin = 0.0f;
+                v->ldb = -60.0f;
+                v->rest = 20.0f;
+                v->hf = 1.0f;
+                v->hand = 0;
+                if (v->midi_note) {
+                    midi(0x80, v->midi_note, 0);
+                    v->midi_note = 0;
+                }
+                return;
+            }
             v->hf = 0.0f;
             v->hand = 2;
-            v->t = 0.15f;                       /* a breath already rising, on the new chord */
-            pad_breathe(v, i);
+            pad_note_on(v, i);
         }
     } else if (v->hand == 2) {                  /* into the new */
         v->hf += HAND_STEP * 0.6f;
@@ -491,18 +621,24 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: the breath,
             v->hand = 0;
         }
     }
-    v->t += v->rate;
-    if (v->t >= 1.0f) {
-        v->t -= 1.0f;
-        pad_breathe(v, i);
-    }
     v->vib += (4.6f + 0.4f * (float)i) * 32.0f / EN_SR;
     if (v->vib >= 1.0f)
         v->vib -= 1.0f;
-    f = mtof(v->note + 0.08f * motion * mod[i].v);                          /* a slow drift, as tape */
+    /* no pitch drift on the pad (AMB-1: ±4 cents a voice with Motion, "as tape"). The plate's resonances at
+     * this decay are about 0.1 Hz wide, so even a slow drift walks a held note across them in seconds and
+     * its reverb swells or sinks 6-9 dB on its own; and voices drifting apart beat on a chord's coincident
+     * harmonics. The tape wow stays where it is heard: on the echo's repeats. */
+    f = mtof(v->note);
     v->inc[0] = f * 0.99856f * (1.0f / EN_SR);  /* -2.5 and +2.5 cents */
     v->inc[1] = f * 1.00144f * (1.0f / EN_SR);
-    vw = fm_clampf((float)bright * 0.01f + 0.25f * arcm + 0.2f * motion * mod[(i + 2) % NMOD_PAD].v, 0.0f, 1.0f) * 2.999f;
+    /* the vowel: Bright, the weather's brightness, this voice's offset, its crest, and the tape wobble;
+     * it moves at most a fiftieth of its range a second (the formants' gain would otherwise swell) */
+    b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v,
+                  0.0f, 1.0f);
+    v->vowel = slew(v->vowel, b, 0.02f, 0.02f, 32.0f / EN_SR);
+    v->idx = slew(v->idx, 0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f) + 0.1f * v->crest,
+                  0.01f, 0.01f, 32.0f / EN_SR);
+    vw = v->vowel * 2.999f;
     a = (int)vw;
     vw -= (float)a;
     f1 = VOWEL[a][0] + (VOWEL[a + 1][0] - VOWEL[a][0]) * vw;
@@ -527,7 +663,9 @@ static inline float blep_saw(float t, float dt)
 /* ------------------------------------------------------------------ bass --- */
 static struct {
     float ph, inc, note, target, amp;
-    uint8_t midi_note, rest;                    /* rest: sitting this chord out */
+    float ldb, lin;                             /* TIDE: its level in dB (slewed) and linear */
+    walker_t lw[2];
+    uint8_t midi_note, rest;                    /* rest: sitting out (the conductor's presence) */
 } bass;
 static float bass_vol, glide_k = 1.0f / (0.25f * EN_SR);      /* glide_k: 1 / the glide's time in samples */
 
@@ -547,6 +685,9 @@ static const float LOOP_PAN[EN_NLOOP] = {-0.6f, 0.35f, 0.7f, -0.25f};
 static const float RATIO[5] = {1.0f, 2.0f, 3.0f, 3.5f, 4.77f};
 
 /* ----------------------------------------------------------------- pulse --- */
+/* AMB-1's pulse (a thump and two hats on Euclidean patterns). TIDE does not play it (Tomorrow's Man: no drum);
+ * the code stays for reference under EN_PULSE. Its slot (level, taps, MIDI channel 9 -> 3) is Ground's. */
+#if EN_PULSE
 typedef struct {
     float ph, inc, inc_end, amp, adec, idx, x1, x2, att, mph[4], pend;
     int32_t wait;                               /* swing: samples until a hit that waits (pend: its velocity) */
@@ -555,13 +696,15 @@ typedef struct {
 static drum_t drum[EN_NDRUM];
 static uint8_t drum_pos[EN_NDRUM];
 static uint32_t drum_pat[EN_NDRUM];
-static float pulse_vol, swing, hat_f = 0.9f, hat_open = 0.42f;
-static float step_len, pulse_left;               /* a sixteenth, in samples; to the next MIDI clock pulse */
+static float swing, hat_f = 0.9f, hat_open = 0.42f;
 static uint32_t noise = 22222u;
 static const uint8_t DRUM_KMAX[EN_NDRUM] = {5, 7, 3};
 static const uint8_t DRUM_GM[EN_NDRUM] = {36, 42, 46};          /* kick, closed hat, open hat */
 /* the hats' metal: four square waves at the 808's inharmonic ratios (Hz / EN_SR) */
 static const float HAT_INC[4] = {304.4f / EN_SR, 369.6f / EN_SR, 522.7f / EN_SR, 800.0f / EN_SR};
+#endif
+static float pulse_vol;                         /* Ground's level (the Pulse parameter) */
+static float step_len, pulse_left;               /* a sixteenth, in samples; to the next MIDI clock pulse */
 
 /* ------------------------------------------------------------------ space --- */
 static float echo_send, rev_send, echo_len, echo_len_t, echo_fb = 0.55f;
@@ -585,14 +728,15 @@ static int bell_note(int l, int off)            /* a loop slot's note, from the 
     return n;
 }
 
+static int reg_now;                             /* the pad's register shift (the register walker, whole semitones) */
 static void pad_retarget(void)                  /* the chord's tones to the four voices */
 {
     int from[4], to[4], i;
     chord_nt = en_chord_tones(pool, par[P_ROOT], deg, chord_pcs);
     for (i = 0; i < EN_NPAD; i++)
         from[i] = (int)(pad[i].target + 0.5f);
-    en_voice_lead(from, chord_pcs, chord_nt, to, 48, 77);
-    for (i = 0; i < EN_NPAD; i++) {             /* each voice takes its note at its next breath */
+    en_voice_lead(from, chord_pcs, chord_nt, to, 48 + reg_now, 77 + reg_now);
+    for (i = 0; i < EN_NPAD; i++) {             /* each voice takes its note as it next enters */
         pad[i].target = (float)to[i];
         en_chord[i] = (uint8_t)to[i];
     }
@@ -604,19 +748,22 @@ static void bass_to(int pc)
 {
     int n = 36 + pc % 12 + 12 * par[P_BASSOCT];     /* C2..B2, an octave down or up */
     bass.target = (float)n;
-    if (en_playing && bass.midi_note != n) {
+    if (en_playing && bass.midi_note != n && !bass.rest) {
         midi(0x82, bass.midi_note, 0);
         midi(0x92, (uint32_t)n, 80);
     }
     bass.midi_note = (uint8_t)n;
 }
 
-static float drift_left, drift_total, evolve;   /* evolve: Evolve, 0..1 */
+static float ground_target;                     /* Ground's note (MIDI), C1..B1 */
+static void ground_to(int pc) { ground_target = (float)(24 + pc % 12); }
+
+static float drift_left, drift_total, evolve;   /* the chord's dwell, in weather seconds; evolve: Evolve, 0..1 */
 static uint8_t change_pending, fifth_done;
 
-static void drift_reset(void)
+static void drift_reset(void)                   /* how long this chord dwells: the chord walker, minutes */
 {
-    drift_total = drift_secs(par[P_DRIFT]) * (0.7f + 0.6f * frand()) * EN_SR;
+    drift_total = 90.0f * fm_exp2f(cd.chord.x) * (0.7f + 0.6f * frand());
     drift_left = drift_total;
     fifth_done = 0;
 }
@@ -642,8 +789,7 @@ static void chord_change(void)                  /* to another degree: the near, 
     pad_retarget();
     pad_leave();
     bass_to(chord_pcs[0]);
-    /* Evolve: the bass sometimes sits a chord out, more often when the arc is sparse */
-    bass.rest = frand() < evolve * 0.3f + 0.25f * fm_maxf(-arcm, 0.0f);
+    ground_to(chord_pcs[0]);
     drift_reset();
 }
 
@@ -665,9 +811,11 @@ static int loop_count(int l)
     return c;
 }
 
-static int loop_target(void)                    /* 0..5 notes: Density, swelled and thinned by the arc */
+/* 0..5 notes: Density, moved by the weather's density, the bells' presence and the governor */
+static int loop_target(void)
 {
-    float d = (float)par[P_DENSITY] * 0.05f * (1.0f + 0.8f * arcm);
+    float presf = fm_clampf((cd.pres[L_BELLS].x - 0.15f) * (1.0f / 0.45f), 0.0f, 1.2f);
+    float d = (float)par[P_DENSITY] * 0.05f * (1.0f + 0.8f * cd.dens) * presf * fm_db2lin(0.7f * cd.trim);
     return (int)(fm_clampf(d, 0.0f, 5.0f) + frand());
 }
 static uint8_t loop_rest[EN_NLOOP];             /* this pass: silent (Evolve) */
@@ -713,13 +861,20 @@ static void loop_regrow(int l)
 
 static void loop_pass(int l)                    /* the end of a pass: grow, prune, evolve */
 {
-    int c = loop_count(l), t = loop_target(), s;
+    int c, t, s;
+    const float ev = evolve;
+    if (cd.speed <= 0.0f) {                     /* Drift at Hold: the cells keep their notes (and none sits out) */
+        loop_rest[l] = 0;
+        return;
+    }
+    c = loop_count(l);
+    t = loop_target();
     for (; c < t; c++)                          /* Density: to its count by the end of a pass */
         loop_add(l);
     for (; c > t && (s = loop_pick(l)) >= 0; c--)
         loop_note[l][s] = -1;
-    loop_rest[l] = frand() < evolve * 0.15f + 0.15f * fm_maxf(-arcm, 0.0f);
-    if (frand() < evolve * 0.7f && (s = loop_pick(l)) >= 0) {
+    loop_rest[l] = frand() < ev * 0.15f;
+    if (frand() < ev * 0.7f && (s = loop_pick(l)) >= 0) {
         if (frand() < 0.5f) {
             loop_note[l][s] = (int8_t)rand_offset();             /* another note */
         } else {
@@ -782,11 +937,12 @@ static void bell_ring(int l, int slot)
     float vel = (float)loop_vel[l][slot] * 0.01f;
     int32_t wait = irand(2600);                 /* a human hand: up to 60 ms late */
     bell_voice(l, n, vel, wait);
-    if (n + 12 <= 103 && frand() < 0.08f + 0.12f * fm_maxf(arcm, 0.0f))
+    if (n + 12 <= 103 && frand() < 0.08f + 0.24f * fm_maxf(cd.br, 0.0f))
         bell_voice(l, n + 12, vel * 0.4f, wait + 300 + irand(2000));   /* now and then, its octave */
 }
 
 /* ---------------------------------------------------------------- pulse --- */
+#if EN_PULSE
 static const uint8_t DRUM_ROT[EN_NDRUM] = {0, 2, 3};
 static int drum_k[EN_NDRUM], drum_kb[EN_NDRUM], drum_rot[EN_NDRUM], pulse_rest;   /* rest: bars left */
 
@@ -881,29 +1037,34 @@ static void drums_wait_step(int32_t k)          /* k samples went by: hits whose
             drum_fire(d, drum[d].pend);
         }
 }
+#endif
 
 /* the grid: one call a sixteenth (MIDI clock: 6 ticks) */
 static uint32_t sixteenth;
 static void tick(void)
 {
-    int d, l;
-    const float pa = fm_clampf(1.0f + 1.3f * arcm, 0.3f, 1.15f);   /* the arc: the pulse fades (never out) */
-    if ((sixteenth & 15u) == 0u) {              /* a bar: Evolve's rests and turns */
-        if (pulse_rest > 0)
-            pulse_rest--;
-        else if (frand() < evolve * 0.015f)
-            pulse_rest = 2 + irand(3);           /* a short breath: 2 to 4 bars */
-        en_pulse_rest = (uint8_t)(pulse_rest > 0);
-        if (frand() < evolve * 0.25f)
-            drums_evolve();
+    int l;
+#if EN_PULSE
+    {
+        int d;
+        if ((sixteenth & 15u) == 0u) {              /* a bar: Evolve's rests and turns */
+            if (pulse_rest > 0)
+                pulse_rest--;
+            else if (frand() < evolve * 0.015f)
+                pulse_rest = 2 + irand(3);           /* a short breath: 2 to 4 bars */
+            en_pulse_rest = (uint8_t)(pulse_rest > 0);
+            if (frand() < evolve * 0.25f)
+                drums_evolve();
+        }
+        for (d = 0; d < EN_NDRUM; d++) {
+            if (drum_pat[d] >> drum_pos[d] & 1u && !pulse_rest)
+                drum_hit(d, (drum_pos[d] == 0 ? 0.95f : 0.6f) + 0.25f * frand(), (int)(sixteenth & 1u));
+            en_drum_pos[d] = drum_pos[d];
+            if (++drum_pos[d] >= EN_DRUM_N[d])
+                drum_pos[d] = 0;
+        }
     }
-    for (d = 0; d < EN_NDRUM; d++) {
-        if (drum_pat[d] >> drum_pos[d] & 1u && !pulse_rest)
-            drum_hit(d, ((drum_pos[d] == 0 ? 0.95f : 0.6f) + 0.25f * frand()) * pa, (int)(sixteenth & 1u));
-        en_drum_pos[d] = drum_pos[d];
-        if (++drum_pos[d] >= EN_DRUM_N[d])
-            drum_pos[d] = 0;
-    }
+#endif
     if ((sixteenth & 3u) == 0u) {               /* the loops step in quarter notes */
         for (l = 0; l < EN_NLOOP; l++) {
             int s = loop_pos[l];
@@ -1046,6 +1207,7 @@ static uint32_t head_left;                       /* samples until the second hea
 static int16_t plex[PLEX_N];
 static int plex_w;
 static float plex_lp, plex_lp2;
+static float echo_fb_eff = 0.55f;                /* the feedback as played: Size, the space walker, the governor */
 
 static inline float tape_read(float d)           /* d quarter-rate samples ago */
 {
@@ -1137,7 +1299,7 @@ static inline void echoes(float in, float *el, float *er, float *xl, float *xr)
         fb = tape_lp - tape_hp;
         if (++tape_w >= TAPE_N)
             tape_w = 0;
-        tape[tape_w] = s16(tape_acc * 0.25f + echo_fb * fb);
+        tape[tape_w] = s16(tape_acc * 0.25f + echo_fb_eff * fb);
         tape_acc = 0.0f;
         tape_p1 = tape_c1;
         tape_p2 = tape_c2;
@@ -1158,6 +1320,17 @@ static uint32_t ext_age;
 
 static void tempo_set(void) { step_len = EN_SR * 60.0f / ((float)par[P_TEMPO] * 4.0f); }
 
+static void swell_set(void)                     /* Swell: how far each voice's level walkers stray */
+{
+    int i, k;
+    float sd = 0.6f + 0.02f * swell;            /* dB per walker: 0.6 .. 2.6 (three summed) */
+    for (i = 0; i < EN_NPAD; i++)
+        for (k = 0; k < 3; k++)
+            pad[i].lw[k].sd = sd;
+    for (k = 0; k < 2; k++)
+        bass.lw[k].sd = 0.5f * sd;
+}
+
 static void apply(int p, int v)
 {
     const en_param_t *pi = &PARAMS[p];
@@ -1171,24 +1344,20 @@ static void apply(int p, int v)
     case P_BELLS: bell_vol = (float)(v * v) * 0.0001f; break;
     case P_BASS: bass_vol = (float)(v * v) * 0.0001f; break;
     case P_PULSE: pulse_vol = (float)(v * v) * 0.0001f; break;
+#if EN_PULSE
     case P_HITS: drums_pattern(); break;
-    case P_BASSOCT:
-        if (nsteps)
-            bass_to(bass.midi_note % 12);
-        break;
-    case P_GLIDE: glide_k = 1.0f / ((0.02f + 0.012f * (float)v) * EN_SR); break;   /* 20 ms .. 1.2 s */
     case P_SWING: swing = (float)v * 0.005f; break;      /* the off sixteenths up to half a step late */
     case P_HATS:
         hat_f = 0.55f + 0.0070f * (float)v;               /* the high-pass: ~4 kHz dark .. ~10 kHz bright */
         hat_open = 0.6f - 0.0035f * (float)v;             /* the open hat: long and soft .. short and crisp */
         break;
-    case P_DRIFT:
-        if (drift_total > 0.0f) {                /* keep the progress, at the new pace */
-            float frac = drift_left / drift_total;
-            drift_total = drift_secs(v) * EN_SR;
-            drift_left = frac * drift_total;
-        }
+#endif
+    case P_BASSOCT:
+        if (nsteps)
+            bass_to(bass.midi_note % 12);
         break;
+    case P_GLIDE: glide_k = 1.0f / ((0.02f + 0.012f * (float)v) * EN_SR); break;   /* 20 ms .. 1.2 s */
+    case P_DRIFT: cd.speed = drift_speed(v); break;
     case P_ECHO: echo_send = (float)(v * v) * 0.0001f; break;
     case P_ETIME: echo_time(); break;
     case P_REVERB: rev_send = (float)(v * v) * 0.0001f; break;
@@ -1197,7 +1366,10 @@ static void apply(int p, int v)
         echo_fb = 0.5f + 0.32f * (float)v * 0.01f;
         break;
     case P_BRIGHT: bright = (float)v; break;
-    case P_SWELL: swell = (float)v; break;
+    case P_SWELL:
+        swell = (float)v;
+        swell_set();
+        break;
     case P_EVOLVE: evolve = (float)v * 0.01f; break;
     case P_BTONE: btone = (float)v * 0.01f; break;
     case P_PADTONE: pad_handoff(); break;        /* the voices cross over as they did for a new key */
@@ -1223,6 +1395,7 @@ static void apply(int p, int v)
             pad_retarget();
             pad_handoff();
             bass_to(chord_pcs[0]);
+            ground_to(chord_pcs[0]);
         }
         break;
     case P_MIDI:
@@ -1242,11 +1415,346 @@ static void pool_set(uint32_t p)
     pad_retarget();
     pad_handoff();
     bass_to(chord_pcs[0]);
+    ground_to(chord_pcs[0]);
 }
 
-static void regrow(void)                        /* a new piece: fresh loops, home chord, patterns home */
+/* ------------------------------------------------- TIDE: the conductor --- */
+static void conductor_reset(void)               /* a new piece: the weather and seasons start afresh */
+{
+    int i, k;
+    walker_set(&cd.s_speed, 0.0f, 2.3f * 3600.0f, 0.35f, -1.0f, 1.0f);       /* log2 of the weather's pace */
+    walker_set(&cd.s_density, 0.0f, 3.1f * 3600.0f, 0.2f, -0.5f, 0.5f);
+    walker_set(&cd.s_bright, 0.0f, 1.7f * 3600.0f, 0.12f, -0.3f, 0.3f);
+    walker_set(&cd.bright, 0.0f, 11.0f * 60.0f, 0.18f, -0.5f, 0.5f);
+    walker_set(&cd.density, 0.0f, 17.0f * 60.0f, 0.3f, -0.9f, 0.9f);
+    walker_set(&cd.reg, 0.0f, 23.0f * 60.0f, 2.5f, -6.0f, 6.0f);
+    walker_set(&cd.space, 0.0f, 13.0f * 60.0f, 0.4f, -1.0f, 1.0f);
+    walker_set(&cd.chord, 0.0f, 8.0f * 60.0f, 0.5f, -1.2f, 1.2f);
+    walker_set(&cd.pres[L_PAD], 0.5f, 9.0f * 60.0f, 0.3f, 0.0f, 1.0f);
+    walker_set(&cd.pres[L_BELLS], 0.6f, 14.0f * 60.0f, 0.3f, 0.0f, 1.0f);
+    walker_set(&cd.pres[L_BASS], 0.5f, 19.0f * 60.0f, 0.3f, 0.0f, 1.0f);
+    walker_set(&cd.pres[L_GROUND], 0.3f, 29.0f * 60.0f, 0.3f, 0.0f, 1.0f);   /* enters above 0.65: about 12% of the time */
+    for (k = 0; k < L_GROUND; k++)              /* a piece begins with its layers present: the rests come later */
+        cd.pres[k].x = fm_clampf(cd.pres[k].center + 0.5f * fm_fabsf(cd.pres[k].x - cd.pres[k].center), 0.0f, 1.0f);
+    cd.wspeed = cd.speed;
+    cd.dens = cd.br = 0.0f;
+    for (k = 0; k < NLAYERS; k++) {
+        cd.e20[k] = 0.0f;
+        cd.bias[k] = cd.gdb[k] = 0.0f;
+        cd.g[k] = 1.0f;
+        cd.share[k] = 0.0f;
+        cd.lead[k] = 0.0f;
+    }
+    cd.m3 = cd.m20 = cd.m60 = 0.0f;
+    cd.trim = 0.0f;
+    cd.pad_thin = 0;
+    cd.pad_target = 0;
+    cd.since_entry = 100.0f;
+    for (i = 0; i < EN_NPAD; i++) {
+        pad_t *v = &pad[i];
+        walker_set(&v->lw[0], 0.0f, 25.0f * VOICE_K[i], 1.8f, -6.0f, 6.0f);
+        walker_set(&v->lw[1], 0.0f, 47.0f * VOICE_K[i], 1.8f, -6.0f, 6.0f);
+        walker_set(&v->lw[2], 0.0f, 90.0f * VOICE_K[i], 1.8f, -6.0f, 6.0f);
+        walker_set(&v->bw, 0.0f, 60.0f * VOICE_K[i], 0.08f, -0.2f, 0.2f);
+        v->rest = 0.0f;
+    }
+    walker_set(&bass.lw[0], 0.0f, 40.0f, 1.0f, -5.0f, 5.0f);
+    walker_set(&bass.lw[1], 0.0f, 95.0f, 1.0f, -5.0f, 5.0f);
+    swell_set();
+    ground_gap = 120.0f;
+    ground_stay = 0.0f;
+    ground_due = 0.0f;
+    ground_due_at = (40.0f + 30.0f * frand()) * 60.0f;
+    reg_now = 0;
+}
+
+static int pad_count(void)                      /* voices singing (not dissolving) */
+{
+    int i, c = 0;
+    for (i = 0; i < EN_NPAD; i++)
+        c += pad[i].st == PV_ON;
+    return c;
+}
+
+/* the governor (DESIGN section 5): each layer's energy over the last step, the plate's and the echoes'
+ * returns shared out in proportion to the sends, smoothed; the mix against the Density target; each
+ * layer's share against the cap. It moves a trim (everything) and a bias per layer, slowly. */
+static const float SEND_R[NLAYERS] = {1.08f, 0.98f, 0.0064f, 0.0225f};  /* reverb send energy per dry energy */
+static const float SEND_E[NLAYERS] = {0.12f, 1.45f, 0.0f, 0.0f};        /* echo send energy per dry energy */
+static const float K_W[NLAYERS] = {1.0f, 1.6f, 0.8f, 0.5f};             /* about a loudness meter's K-weighting at each
+                                                                         * layer's register: bells +2 dB, bass -1, Ground -3 */
+static void governor_step(float dt)
+{
+    float dry[NLAYERS], e[NLAYERS], plate, echo, mix, sa = 0.0f, se = 0.0f, tot = 0.0f, err, cap;
+    int k;
+    const float inv = cd.frames ? 1.0f / (2.0f * (float)cd.frames) : 0.0f;
+    for (k = 0; k < NLAYERS; k++) {
+        dry[k] = cd.e_dry[k] * inv;
+        sa += SEND_R[k] * dry[k];
+        se += SEND_E[k] * dry[k];
+        cd.e_dry[k] = 0.0f;
+    }
+    plate = cd.e_plate * inv;
+    echo = cd.e_echo * inv;
+    cd.e_plate = cd.e_echo = 0.0f;
+    cd.frames = 0;
+    mix = plate + echo;
+    mix = 0.0f;
+    for (k = 0; k < NLAYERS; k++) {
+        e[k] = dry[k] + (sa > 0.0f ? plate * SEND_R[k] * dry[k] / sa : 0.0f) + (se > 0.0f ? echo * SEND_E[k] * dry[k] / se : 0.0f);
+        mix += K_W[k] * e[k];
+        cd.e20[k] += (e[k] - cd.e20[k]) * fm_minf(dt * (1.0f / 20.0f), 1.0f);
+        tot += cd.e20[k];
+    }
+    cd.m3 += (mix - cd.m3) * fm_minf(dt * (1.0f / 3.0f), 1.0f);
+    cd.m20 += (mix - cd.m20) * fm_minf(dt * (1.0f / 20.0f), 1.0f);
+    cd.m60 += (mix - cd.m60) * fm_minf(dt * (1.0f / 60.0f), 1.0f);
+    cd.level20 = 3.0103f * fm_log2f(fm_maxf(cd.m20, 1e-9f));
+    cd.level60 = 3.0103f * fm_log2f(fm_maxf(cd.m60, 1e-9f));
+    cd.target = -18.0f + 0.15f * (float)(par[P_DENSITY] - 40);   /* AMB-1's Garden sat at -16 with the pad at 78% */
+    if (!en_playing || cd.speed <= 0.0f)        /* resting, or Drift at Hold: the governor's hands hold too */
+        return;
+    /* loudness: inside the band (±1 dB) nothing; outside, the trim moves, at most 0.1 dB/s */
+    err = cd.level20 - cd.target;
+    if (err > 1.0f || err < -1.0f)
+        cd.trim = fm_clampf(cd.trim - fm_clampf(err * (1.0f / 6.0f), -1.0f, 1.0f) * 0.1f * dt, -12.0f, 9.0f);
+    /* shares: a layer over the cap (45% with three or more layers sounding, 65% with two) is drawn
+     * down (at most 10 dB, 0.1 dB/s) and the resting layers are called; 10 points under it its bias
+     * returns. The pad, when it has led for two minutes, also loses a voice. */
+    {
+        int active = 0;
+        for (k = 0; k < NLAYERS; k++)
+            active += cd.e20[k] > 1e-5f;        /* sounding (above -50 dB): a resting layer is not counted */
+        cap = active >= 3 ? 0.45f : 2.0f;       /* two layers: no bias (one of them must lead); the call below */
+    }
+    for (k = 0; k < NLAYERS; k++) {
+        int j;
+        float want;
+        cd.share[k] = tot > 0.0f ? cd.e20[k] / tot : 0.0f;
+        cd.lead[k] = cd.share[k] > 0.5f ? cd.lead[k] + dt : fm_maxf(cd.lead[k] - dt, 0.0f);
+        /* the bias: 0 at the cap less 5 points, -8 dB at the cap plus 25, in between in proportion */
+        want = -8.0f * fm_clampf((cd.share[k] - (cap - 0.05f)) * (1.0f / 0.3f), 0.0f, 1.0f);
+        if (err < -1.0f && want < cd.bias[k])
+            want = cd.bias[k];                  /* the mix is under its target: no layer is drawn down further */
+        cd.bias[k] = slew(cd.bias[k], want, 0.06f, 0.06f, dt);
+        if (cd.lead[k] > 180.0f)                /* it has led for three minutes: the others are called back */
+            for (j = 0; j < NLAYERS; j++)
+                if (j != k && j != L_GROUND && cd.pres[j].x < cd.pres[j].center + 0.2f)
+                    cd.pres[j].x = fm_minf(cd.pres[j].x + 0.02f * dt * cd.speed, 1.0f);
+        cd.gdb[k] = slew(cd.gdb[k], cd.trim + cd.bias[k], 0.16f, 0.16f, dt);
+        cd.g[k] = fm_db2lin(cd.gdb[k]);
+    }
+    if (cd.share[L_PAD] > cap + 0.05f && cd.lead[L_PAD] > 120.0f)
+        cd.pad_thin = 1;                        /* (never with fewer than three layers sounding: cap is 2) */
+    else if (cd.share[L_PAD] < cap - 0.05f)
+        cd.pad_thin = 0;
+    if (err < -2.0f)                            /* the whole garden has thinned: the resting layers are called */
+        for (k = 0; k < L_GROUND; k++)
+            if (cd.pres[k].x < cd.pres[k].center)
+                cd.pres[k].x = fm_minf(cd.pres[k].x + 0.03f * dt * cd.speed, 1.0f);
+}
+
+static void pad_step(float dt)
+{
+    int i, n_on, want_n;
+    float want;
+    cd.since_entry += dt;
+    /* how many voices: the pad's presence, the density, the Density knob, the governor */
+    want = fm_clampf(cd.pres[L_PAD].x + 0.25f * cd.dens + 0.3f * (float)(par[P_DENSITY] - 40) * (1.0f / 60.0f)
+                     + 0.05f * fm_clampf(cd.target - cd.level20, -4.0f, 4.0f), 0.0f, 1.0f);   /* the governor's headroom */
+    want_n = want < 0.3f ? 0 : want < 0.6f ? 1 : want < 0.85f ? 2 : 3;   /* about 25% / 38% / 25% / 12% */
+    want_n -= cd.pad_thin;
+    if (want_n < 0)
+        want_n = 0;
+    if (!en_playing || cd.speed <= 0.0f)
+        want_n = pad_count();                   /* resting, or Hold: no entrances, no leaves */
+    cd.pad_target = want_n;
+    for (i = 0; i < EN_NPAD; i++) {             /* each voice: its walkers, its stay, its level */
+        pad_t *v = &pad[i];
+        float tgt;
+        walk(&v->lw[0], cd.speed);
+        walk(&v->lw[1], cd.speed);
+        walk(&v->lw[2], cd.speed);
+        walk(&v->bw, cd.speed);
+        if (v->rest > 0.0f)
+            v->rest -= dt;
+        if (v->st == PV_ON) {
+            if (cd.speed > 0.0f)
+                v->stay -= dt;
+            if (v->stay <= 0.0f)
+                v->st = PV_OUT;
+        }
+        tgt = v->st == PV_ON ? v->base_db + v->lw[0].x + v->lw[1].x + v->lw[2].x : -60.0f;
+        v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f ? 2.0f : v->rise,
+                      v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : v->fall, dt);
+        v->crest = fm_clampf((v->ldb - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
+        if (v->st == PV_OUT && v->ldb <= -50.0f) {
+            v->st = PV_OFF;
+            v->rest = 20.0f + 40.0f * frand();
+            if (v->midi_note) {
+                midi(0x80, v->midi_note, 0);
+                v->midi_note = 0;
+            }
+        }
+        v->lin = v->st == PV_OFF ? 0.0f : fm_db2lin(v->ldb);
+    }
+    n_on = pad_count();
+    if (n_on > want_n) {                        /* one too many: the one nearest the end of its stay leaves */
+        int best = -1;
+        for (i = 0; i < EN_NPAD; i++)
+            if (pad[i].st == PV_ON && (best < 0 || pad[i].stay < pad[best].stay))
+                best = i;
+        if (best >= 0)
+            pad[best].st = PV_OUT;
+    } else if (n_on < want_n && cd.since_entry >= (cd.opening > 0.0f ? 3.0f : 10.0f)) {
+        /* one more: a rested voice, by preference one whose note no singing voice has; when every voice is
+         * still dissolving (a chord change can send three out at once), the faintest one below -30 dB takes
+         * its new note from where it is */
+        int best = -1, k;
+        for (i = 0; i < EN_NPAD; i++) {
+            int dup = 0;
+            if (pad[i].st != PV_OFF || pad[i].rest > 0.0f)
+                continue;
+            for (k = 0; k < EN_NPAD; k++)
+                dup |= k != i && pad[k].st == PV_ON && (int)pad[k].note % 12 == (int)pad[i].target % 12;
+            if (!dup) {
+                best = i;
+                break;
+            }
+            if (best < 0)
+                best = i;
+        }
+        if (best < 0)
+            for (i = 0; i < EN_NPAD; i++)
+                if (pad[i].st == PV_OUT && pad[i].ldb < -30.0f && !pad[i].hand && (best < 0 || pad[i].ldb < pad[best].ldb))
+                    best = i;
+        if (best >= 0)
+            pad_enter(&pad[best], best);
+    }
+}
+
+static void bass_step(float dt)
+{
+    float tgt;
+    walk(&bass.lw[0], cd.speed);
+    walk(&bass.lw[1], cd.speed);
+    if (en_playing && cd.speed > 0.0f) {       /* the bass sits out when its presence is low */
+        if (!bass.rest && cd.pres[L_BASS].x < 0.3f) {
+            bass.rest = 1;
+            midi(0x82, bass.midi_note, 0);
+        } else if (bass.rest && cd.pres[L_BASS].x > 0.4f) {
+            bass.rest = 0;
+            midi(0x92, bass.midi_note, 80);
+        }
+    }
+    tgt = en_playing && !bass.rest ? bass.lw[0].x + bass.lw[1].x : -60.0f;
+    bass.ldb = slew(bass.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.4f, en_playing ? 0.25f : 6.0f, dt);
+    bass.lin = bass.ldb <= -59.0f ? 0.0f : fm_db2lin(bass.ldb);
+}
+
+static void ground_step(float dt)               /* Ground: rare, slow, low (TESTING #9) */
+{
+    float tgt;
+    if (ground_gap > 0.0f)
+        ground_gap -= dt;
+    if (en_playing && cd.speed > 0.0f) {
+        if (!ground_on) {
+            ground_due += dt * cd.wspeed;
+            if (ground_due > ground_due_at && cd.pres[L_GROUND].x < 0.7f)   /* overdue: called up */
+                cd.pres[L_GROUND].x += 0.01f * dt * cd.speed;
+        }
+        if (!ground_on && ground_gap <= 0.0f && cd.pres[L_GROUND].x > 0.65f) {
+            ground_on = 1;
+            ground_stay = 120.0f + 180.0f * frand();
+            midi(0x93, (uint32_t)ground_target, 70);
+        } else if (ground_on) {
+            ground_stay -= dt;
+            if (cd.pres[L_GROUND].x < 0.5f || ground_stay <= 0.0f) {
+                ground_on = 0;
+                ground_gap = 180.0f + 240.0f * frand();
+                ground_due = 0.0f;
+                ground_due_at = (40.0f + 30.0f * frand()) * 60.0f;
+                midi(0x83, (uint32_t)ground_target, 0);
+            }
+        }
+    }
+    tgt = en_playing && ground_on ? 0.0f : -60.0f;
+    ground_db = slew(ground_db, tgt, 0.3f, en_playing ? 0.2f : 6.0f, dt);
+    ground_lin = ground_db <= -59.0f ? 0.0f : fm_db2lin(ground_db);
+    en_ground_level = ground_lin;
+    en_drum_glow[0] = ground_lin;               /* the screen's fourth meter (Phase 6 gives it a name) */
+}
+
+static void conductor_step(void)                /* every CTRL_N samples */
+{
+    const float dt = CTRL_DT;
+    const int hold = !en_playing || en_frozen;
+    const float sp = hold ? 0.0f : cd.speed;
+    int k;
+    if (cd.opening > 0.0f)
+        cd.opening -= dt;
+    /* seasons, then the weather at the season's pace */
+    walk(&cd.s_speed, sp);
+    walk(&cd.s_density, sp);
+    walk(&cd.s_bright, sp);
+    cd.wspeed = sp * fm_exp2f(cd.s_speed.x);
+    walk(&cd.bright, cd.wspeed);
+    walk(&cd.density, cd.wspeed);
+    walk(&cd.reg, cd.wspeed);
+    walk(&cd.space, cd.wspeed);
+    walk(&cd.chord, cd.wspeed);
+    for (k = 0; k < NLAYERS; k++)
+        walk(&cd.pres[k], cd.wspeed);
+    cd.dens = fm_clampf(cd.density.x + cd.s_density.x + fm_clampf(cd.trim * 0.05f, -0.4f, 0.2f), -1.0f, 1.0f);
+    cd.br = fm_clampf(cd.bright.x + cd.s_bright.x, -0.6f, 0.6f);
+    reg_now = (int)(cd.reg.x + (cd.reg.x >= 0.0f ? 0.5f : -0.5f));
+    echo_fb_eff = fm_clampf(echo_fb + 0.08f * cd.space.x - 0.05f * fm_clampf(-cd.trim * (1.0f / 6.0f), 0.0f, 1.0f), 0.3f, 0.9f);
+    governor_step(dt);
+    pad_step(dt);
+    bass_step(dt);
+    ground_step(dt);
+    /* the chord dwells in weather seconds: Hold stops it, a fast season shortens it */
+    if (en_playing && !en_frozen && !change_pending) {
+        drift_left -= dt * cd.wspeed;
+        if (!fifth_done && drift_left < 0.5f * drift_total) {
+            fifth_done = 1;                      /* halfway: the bass may lean on the fifth */
+            if (frand() < (float)par[P_FIFTH] * 0.01f && chord_nt >= 3)
+                bass_to(chord_pcs[2]);
+        }
+        if (drift_left <= 0.0f)
+            change_pending = 1;
+    }
+    en_drift = drift_total > 0.0f ? 1.0f - fm_clampf(drift_left / drift_total, 0.0f, 1.0f) : 0.0f;
+    en_arc = cd.dens;
+    /* for the screen and the harness */
+    en_cond[CD_BRIGHT] = cd.br;
+    en_cond[CD_DENSITY] = cd.dens;
+    en_cond[CD_REGISTER] = cd.reg.x;
+    en_cond[CD_SPACE] = cd.space.x;
+    en_cond[CD_CHORD] = cd.chord.x;
+    for (k = 0; k < NLAYERS; k++) {
+        en_cond[CD_PRES_PAD + k] = cd.pres[k].x;
+        en_cond[CD_SHARE_PAD + k] = cd.share[k];
+        en_cond[CD_GAIN_PAD + k] = cd.gdb[k];
+    }
+    en_cond[CD_S_SPEED] = cd.s_speed.x;
+    en_cond[CD_S_DENSITY] = cd.s_density.x;
+    en_cond[CD_S_BRIGHT] = cd.s_bright.x;
+    en_cond[CD_SPEED] = cd.wspeed;
+    en_cond[CD_LEVEL20] = cd.level20;
+    en_cond[CD_LEVEL60] = cd.level60;
+    en_cond[CD_TARGET] = cd.target;
+    en_cond[CD_TRIM] = cd.trim;
+    en_cond[CD_PAD_TARGET] = (float)cd.pad_target;
+    en_cond[CD_PAD_VOICES] = (float)pad_count();
+    en_cond[CD_GROUND] = ground_db;
+    en_cond[CD_OPENING] = cd.opening > 0.0f ? 1.0f : 0.0f;
+}
+
+static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */
 {
     int l;
+    conductor_reset();
     for (l = 0; l < EN_NLOOP; l++) {
         loop_regrow(l);
         loop_rest[l] = 0;
@@ -1255,10 +1763,13 @@ static void regrow(void)                        /* a new piece: fresh loops, hom
     pad_retarget();
     pad_handoff();
     bass_to(chord_pcs[0]);
+    ground_to(chord_pcs[0]);
     bass.rest = 0;
-    pulse_rest = 0;
     en_pulse_rest = 0;
+#if EN_PULSE
+    pulse_rest = 0;
     drums_pattern();
+#endif
     drift_reset();
     change_pending = 0;
 }
@@ -1276,11 +1787,23 @@ static void quiet(void)
     int i;
     for (i = 0; i < NBELL; i++)
         bell[i].on = 0;
+#if EN_PULSE
     for (i = 0; i < EN_NDRUM; i++)
         drum[i].on = 0, drum[i].wait = 0;
-    for (i = 0; i < EN_NPAD; i++)
+#endif
+    for (i = 0; i < EN_NPAD; i++) {
         pad[i].amp = 0.0f;
+        pad[i].lin = 0.0f;
+        pad[i].ldb = -60.0f;
+        pad[i].st = PV_OFF;
+        pad[i].midi_note = 0;
+    }
     bass.amp = 0.0f;
+    bass.ldb = -60.0f;
+    bass.lin = 0.0f;
+    ground_db = -60.0f;
+    ground_lin = 0.0f;
+    ground_on = 0;
     notes_off();
 }
 
@@ -1307,15 +1830,33 @@ void en_init(void)
         pad[i].note = pad[i].target = (float)(50 + 7 * i);
         pad[i].pan = PAD_PAN[i];
         pad[i].amp = 0.0f;
+        pad[i].lin = 0.0f;
+        pad[i].ldb = -60.0f;
+        pad[i].st = PV_OFF;
         pad[i].ph[0] = 0.0f;
         pad[i].ph[1] = 0.37f;
         pad[i].vib = 0.3f * (float)i;
         pad[i].midi_note = 0;
         pad[i].hf = 1.0f;
         pad[i].hand = 0;
+        pad[i].rise = 0.4f;
+        pad[i].fall = 0.25f;
     }
-    arcm = 0.0f;
+    bass.ldb = -60.0f;
+    bass.lin = 0.0f;
+    bass.amp = 0.0f;
+    ground_db = -60.0f;
+    ground_lin = 0.0f;
+    ground_on = 0;
     pad_gain = 0.0f;
+    cd.speed = 1.0f;
+    cd.opening = 0.0f;
+    cd.acc = 0;
+    cd.frames = 0;
+    for (i = 0; i < NLAYERS; i++)
+        cd.e_dry[i] = 0.0f;
+    cd.e_plate = cd.e_echo = 0.0f;
+    conductor_reset();
     for (i = 0; i < P_NPARAMS; i++)
         apply(i, PARAMS[i].def);
     pool_set(EN_MODE_POOL[par[P_MODE]]);
@@ -1326,9 +1867,13 @@ void en_init(void)
         loop_pos[i] = 0;
         loop_regrow(i);
     }
+#if EN_PULSE
     drums_pattern();
+#endif
     drift_reset();
     pl_decay = pl_decay_t;
+    for (i = 0; i < EN_NCOND; i++)
+        en_cond[i] = 0.0f;
 }
 
 /* ------------------------------------------------------------ transport --- */
@@ -1344,36 +1889,47 @@ static void clock_pulse(void)
 
 static void play_start(int from_top)
 {
-    int i;
+    int i, any = 0;
     if (from_top) {
         pulse = 0;
         sixteenth = 0;
+#if EN_PULSE
         for (i = 0; i < EN_NDRUM; i++)
             drum_pos[i] = 0;
+#endif
         for (i = 0; i < EN_NLOOP; i++)
             loop_pos[i] = 0;
     }
     pulse_left = 0.0f;
     en_playing = 1;
     pad_gate = 1.0f;
-    for (i = 0; i < EN_NPAD; i++)               /* from silence: the breaths start over, overlapping */
-        if (pad[i].amp < 1e-4f) {
-            pad[i].t = START_T[i];
+    for (i = 0; i < EN_NPAD; i++)
+        any |= pad[i].amp >= 1e-4f;
+    if (!any) {                                  /* from silence: a quicker start, one voice at once */
+        cd.opening = 30.0f;
+        cd.since_entry = 100.0f;
+        for (i = 0; i < EN_NPAD; i++) {
+            pad[i].st = PV_OFF;
+            pad[i].rest = 0.0f;
             pad[i].midi_note = 0;
-            pad_breathe(&pad[i], i);
         }
+        pad_enter(&pad[0], 0);
+    }
     if (bass.amp < 1e-4f)
         bass.note = bass.target;
-    midi(0x92, bass.midi_note, 80);
+    if (!bass.rest)
+        midi(0x92, bass.midi_note, 80);
     if (!en_ext)
         midi(from_top ? 0xFA : 0xFB, 0, 0);
 }
 
 static void play_stop(void)
 {
+#if EN_PULSE
     int d;
     for (d = 0; d < EN_NDRUM; d++)
         drum[d].wait = 0;                        /* a swung hit still waiting stays unplayed */
+#endif
     en_playing = 0;
     pad_gate = 0.0f;
     if (!en_ext)
@@ -1436,33 +1992,71 @@ static void drain(void)
 /* --------------------------------------------------------------- render --- */
 #define BLK 256
 static float mixl[BLK], mixr[BLK], rsend[BLK], esend[BLK];
+static float lyl[BLK], lyr[BLK];                /* the layer being rendered, before it joins the mix */
+#ifdef EN_HOST
+static uint8_t host_mute[NLAYERS];
+void en_host_mute(int layer, int on)
+{
+    if (layer >= 0 && layer < NLAYERS)
+        host_mute[layer] = (uint8_t)(on != 0);
+}
+#endif
+
+/* a layer is done: its energy for the governor (and the harness), then into the mix. The sends went to
+ * rsend/esend directly; on the host a muted layer's sends are taken back by the taps below. */
+static void layer_done(int k, uint32_t n)
+{
+    uint32_t j;
+    float e = 0.0f;
+    for (j = 0; j < n; j++)
+        e += lyl[j] * lyl[j] + lyr[j] * lyr[j];
+    cd.e_dry[k] += e;
+#ifdef EN_HOST
+    en_tap_dry[k] += (double)e;
+    if (host_mute[k])
+        return;
+#endif
+    for (j = 0; j < n; j++) {
+        mixl[j] += lyl[j];
+        mixr[j] += lyr[j];
+    }
+}
+static void layer_begin(uint32_t n)
+{
+    uint32_t j;
+    for (j = 0; j < n; j++)
+        lyl[j] = lyr[j] = 0.0f;
+}
 
 /* the pad's bus: a 12 dB low-pass, darker than it sounds on paper (Brian Eno darkened everything: the
  * Synthi's filter below half, then tape). No chorus: a modulated delay against pure tones beats (on
  * the FM-1's speaker above all), and that read as pulsing. The width comes from the voices' places,
  * the echo's two heads and the plate. */
-static float padl[BLK], padr[BLK];
-static float plp[4];
+static float padl[BLK], padr[BLK], padm[BLK];   /* left, right, and the voices' unpanned sum for the sends */
+static float plp[6];
 
 static void pad_bus(uint32_t n)
 {
-    const float fc = fm_clampf(700.0f * fm_exp2f(bright * 0.03f + 0.6f * arcm), 300.0f, 9000.0f);
+    const float fc = fm_clampf(700.0f * fm_exp2f(bright * 0.03f + 1.6f * cd.br), 300.0f, 9000.0f);
     const float c = 1.0f - fm_expf(-FM_TWO_PI * fc * (1.0f / EN_SR));
     uint32_t j;
     for (j = 0; j < n; j++) {
-        float l, r;
+        float m;
         plp[0] += c * (padl[j] - plp[0]);
         plp[1] += c * (plp[0] - plp[1]);
         plp[2] += c * (padr[j] - plp[2]);
         plp[3] += c * (plp[2] - plp[3]);
-        l = plp[1];
-        r = plp[3];
-        mixl[j] += l * 0.8f;
-        mixr[j] += r * 0.8f;
-        rsend[j] += (l + r) * 0.6f;
-        esend[j] += (l + r) * 0.2f;
+        plp[4] += c * (padm[j] - plp[4]);
+        plp[5] += c * (plp[4] - plp[5]);
+        lyl[j] += plp[1] * 0.8f;
+        lyr[j] += plp[3] * 0.8f;
+        /* TIDE: the sends from the unpanned sum (AMB-1 sent l + r, which the pan wobble swelled by up to
+         * 3 dB); 1.35 is the mean of cos + sin over the voices' places, so the space is as full as before */
+        m = plp[5] * 1.35f;
+        rsend[j] += m * 0.6f;
+        esend[j] += m * 0.1f;                   /* AMB-1: 0.2; the tape's comb swells a held note as it drifts */
     }
-    for (j = 0; j < 4; j++)
+    for (j = 0; j < 6; j++)
         plp[j] = fm_flush(plp[j]);
 }
 
@@ -1472,16 +2066,17 @@ static void render_pad(uint32_t n)
     float lvl = 0.0f;
     uint32_t j0;
     for (j0 = 0; j0 < n; j0++)
-        padl[j0] = padr[j0] = 0.0f;
-    const float g = pad_vol * 0.5f;
+        padl[j0] = padr[j0] = padm[j0] = 0.0f;
+    const float g = pad_vol * 0.36f * cd.g[L_PAD];   /* AMB-1: 0.5; TIDE sits the pad 3 dB lower among the layers */
     pad_gain += (pad_gate - pad_gain) * fm_minf((float)n / ((pad_gate > 0.0f ? 2.0f : 5.0f) * EN_SR), 1.0f);
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         float p0 = v->ph[0], p1 = v->ph[1], amp = v->amp, s0 = v->ic[0], s1 = v->ic[1], s2 = v->ic[2], s3 = v->ic[3],
               gl, gr, pn, tgt = 0.0f, idx = 0.0f;
         uint32_t j;
-        if (amp < 1e-5f && pad_gain < 1e-4f) {
+        if (amp < 1e-5f && (pad_gain < 1e-4f || v->lin <= 0.0f)) {
             v->amp = 0.0f;
+            en_pad_amp[i] = 0.0f;
             continue;
         }
         pn = fm_clampf(v->pan + 0.35f * motion * mod[(i + 3) % NMOD_PAD].v, -1.0f, 1.0f);
@@ -1490,12 +2085,9 @@ static void render_pad(uint32_t n)
         for (j = 0; j < n; j++) {
             float x, v1, v2, v3, b1, l1, b2;
             if (!(j & 31u)) {
-                float br;
                 pad_coefs(v, i);
-                br = breath(v->t);
-                tgt = br * v->peak * pad_gain * v->hf;
-                /* the Rhodes blooms: more overtones as the breath swells (index in turns) */
-                idx = (0.04f + 0.1f * bright * 0.01f + 0.1f * br) * (1.0f + 0.4f * arcm);
+                tgt = v->lin * pad_gain * v->hf;
+                idx = v->idx;                    /* the Rhodes blooms: more overtones as the voice crests (in turns) */
             }
             if (!v->voices) {                    /* FM, the modulator at the carrier's pitch: a Rhodes */
                 float m = sine(p0) * idx;
@@ -1507,6 +2099,7 @@ static void render_pad(uint32_t n)
                 x *= amp;
                 padl[j] += x * gl;
                 padr[j] += x * gr;
+                padm[j] += x * g;
                 continue;
             }
             /* as Discreet Music's Synthi: a mellow triangle (a sine's neighbour), a little saw in it */
@@ -1529,8 +2122,9 @@ static void render_pad(uint32_t n)
             b2 = v1 * v->c2[3];
             amp += (tgt - amp) * 0.01f;
             x = (b1 + 0.5f * b2 + 0.45f * l1) * amp;
-            padl[j] += x * gl;                   /* to the pad's bus: smoothed and chorused below */
+            padl[j] += x * gl;                   /* to the pad's bus: smoothed below */
             padr[j] += x * gr;
+            padm[j] += x * g;
         }
         v->ic[0] = fm_flush(s0);
         v->ic[1] = fm_flush(s1);
@@ -1550,10 +2144,9 @@ static void render_pad(uint32_t n)
 static void render_bass(uint32_t n)
 {
     uint32_t j;
-    const float g = bass_vol * 0.42f, tgt = en_playing && !bass.rest ? 1.0f : 0.0f,
-                rate = tgt > 0.0f ? 1.0f / (2.5f * EN_SR) : 1.0f / (4.0f * EN_SR);
+    const float g = bass_vol * 0.6f * cd.g[L_BASS], tgt = bass.lin;   /* AMB-1: 0.42 */
     float ph = bass.ph, amp = bass.amp, inc;
-    if (amp < 1e-5f && !en_playing) {
+    if (amp < 1e-5f && tgt <= 0.0f) {
         bass.amp = 0.0f;
         en_bass_level = 0.0f;
         return;
@@ -1565,10 +2158,10 @@ static void render_bass(uint32_t n)
         ph += inc;
         if (ph >= 2.0f)                          /* two turns: the sub-octave's period */
             ph -= 2.0f;
-        amp += (tgt - amp) * rate;
+        amp += (tgt - amp) * 0.002f;             /* the level is already rate-limited: this only smooths */
         x *= amp * g;
-        mixl[j] += x;
-        mixr[j] += x;
+        lyl[j] += x;
+        lyr[j] += x;
         rsend[j] += x * 0.08f;
     }
     bass.ph = ph;
@@ -1576,10 +2169,48 @@ static void render_bass(uint32_t n)
     en_bass_level = amp;
 }
 
+/* Ground: the chord's root an octave under the bass (C1..B1), two sines a few cents apart (a slow
+ * beat), its octave and a little of its twelfth so small speakers hear it; it enters and leaves over a
+ * minute or two and sits for a few, rarely */
+static struct {
+    float ph, ph2, note, amp;
+} ground;
+static void render_ground(uint32_t n)
+{
+    uint32_t j;
+    const float g = pulse_vol * 0.5f * cd.g[L_GROUND], tgt = ground_lin;
+    float ph = ground.ph, ph2 = ground.ph2, amp = ground.amp, inc;
+    if (amp < 1e-5f && tgt <= 0.0f) {
+        ground.amp = 0.0f;
+        return;
+    }
+    if (ground.note <= 0.0f)
+        ground.note = ground_target;
+    ground.note += (ground_target - ground.note) * fm_minf((float)n * (1.0f / (2.0f * EN_SR)), 1.0f);
+    inc = mtof(ground.note) * (1.0f / EN_SR);
+    for (j = 0; j < n; j++) {
+        float x = (sine(ph) + sine(ph2)) * 0.5f + 0.6f * sine(2.0f * ph) + 0.1f * sine(3.0f * ph2);
+        ph += inc;
+        ph2 += inc * 1.0023f;                    /* 4 cents: a beat every few seconds */
+        if (ph >= 1.0f)
+            ph -= 1.0f;
+        if (ph2 >= 1.0f)
+            ph2 -= 1.0f;
+        amp += (tgt - amp) * 0.002f;
+        x *= amp * g;
+        lyl[j] += x;
+        lyr[j] += x;
+        rsend[j] += x * 0.15f;
+    }
+    ground.ph = ph;
+    ground.ph2 = ph2;
+    ground.amp = amp;
+}
+
 static void render_bells(uint32_t n)
 {
     int i;
-    const float g = bell_vol * 0.62f, arate = 0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f);
+    const float g = bell_vol * 0.8f * cd.g[L_BELLS], arate = 0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f);   /* AMB-1: 0.62 */
     for (i = 0; i < NBELL; i++) {
         bell_t *v = &bell[i];
         float cph = v->cph, mph = v->mph, amp = v->amp, idx = v->idx, att = v->att;
@@ -1598,8 +2229,8 @@ static void render_bells(uint32_t n)
             float m = sine(mph) * idx, x;
             float p = cph + m + 4.0f;            /* + 4 turns: positive for the table */
             x = sine(p) * amp * att * g;
-            mixl[j] += x * v->gl;
-            mixr[j] += x * v->gr;
+            lyl[j] += x * v->gl;
+            lyr[j] += x * v->gr;
             rsend[j] += x * 0.7f;
             esend[j] += x * 0.85f;
             cph += v->cinc;
@@ -1624,6 +2255,7 @@ static void render_bells(uint32_t n)
     }
 }
 
+#if EN_PULSE
 /* a hat: the metal and noise, high-passed (Chamberlin SVF, ~4 to 10 kHz by Hats); no pitch, little echo */
 static void render_hat(drum_t *v, uint32_t n, float g, float pl, float pr)
 {
@@ -1647,8 +2279,8 @@ static void render_hat(drum_t *v, uint32_t n, float g, float pl, float pr)
         x1 += hat_f * hp;
         x2 += hat_f * x1;
         x = hp * amp * att * g;
-        mixl[j] += x * pl;
-        mixr[j] += x * pr;
+        lyl[j] += x * pl;
+        lyr[j] += x * pr;
         rsend[j] += x * 0.2f;
         esend[j] += x * 0.08f;
         amp *= v->adec;
@@ -1671,8 +2303,8 @@ static void render_drums(uint32_t n)
         float ph = v->ph, inc = v->inc, amp = v->amp, att = v->att;
         for (j = 0; j < n; j++) {
             float x = sine(ph) * amp * att * g;
-            mixl[j] += x;
-            mixr[j] += x;
+            lyl[j] += x;
+            lyr[j] += x;
             rsend[j] += x * 0.1f;
             ph += inc;
             if (ph >= 1.0f)
@@ -1690,35 +2322,36 @@ static void render_drums(uint32_t n)
     render_hat(&drum[1], n, g * 0.2f, 0.6f, 1.0f);    /* closed: a little right */
     render_hat(&drum[2], n, g * 0.14f, 1.0f, 0.7f);   /* open: a little left */
 }
+#endif
 
 #ifdef EN_HOST
-/* TIDE: the harness's taps (amb.h). Each layer's part of the block is the difference it makes to the
- * buses; the sums of squares go to the harness, which writes them out once a second. */
+/* TIDE: the harness's taps (amb.h). Each layer's dry energy comes from layer_done(); its sends are the
+ * difference it makes to the send buses, which a muted layer gives back (so a solo render is one layer
+ * with its own echo and reverb, and generation, the governor included, is unchanged). */
 double en_tap_dry[EN_TAP_NLAYERS], en_tap_rsend[EN_TAP_NLAYERS], en_tap_esend[EN_TAP_NLAYERS];
 double en_tap_echo, en_tap_plate;
 uint32_t en_tap_frames;
-static float tapl[BLK], tapr[BLK], taps[BLK], tape_[BLK];
+static float taps[BLK], tape_[BLK];
 static void tap_begin(uint32_t n)
 {
-    memcpy(tapl, mixl, n * sizeof(float));
-    memcpy(tapr, mixr, n * sizeof(float));
     memcpy(taps, rsend, n * sizeof(float));
     memcpy(tape_, esend, n * sizeof(float));
 }
 static void tap_end(int k, uint32_t n)
 {
     uint32_t j;
-    double d = 0.0, s = 0.0, e = 0.0;
+    double s = 0.0, e = 0.0;
     for (j = 0; j < n; j++) {
-        double a = (double)(mixl[j] - tapl[j]), b = (double)(mixr[j] - tapr[j]);
         double c = (double)(rsend[j] - taps[j]), f = (double)(esend[j] - tape_[j]);
-        d += a * a + b * b;
         s += c * c;
         e += f * f;
     }
-    en_tap_dry[k] += d;
     en_tap_rsend[k] += s;
     en_tap_esend[k] += e;
+    if (host_mute[k]) {
+        memcpy(rsend, taps, n * sizeof(float));
+        memcpy(esend, tape_, n * sizeof(float));
+    }
 }
 void en_tap_reset(void)
 {
@@ -1736,13 +2369,7 @@ int en_tap_bells_on(void)
         c += bell[i].on != 0;
     return c;
 }
-int en_tap_drums_on(void)
-{
-    int i, c = 0;
-    for (i = 0; i < EN_NDRUM; i++)
-        c += drum[i].on != 0;
-    return c;
-}
+int en_tap_drums_on(void) { return ground.amp > 1e-4f; }
 int en_tap_deg(void) { return deg; }
 int en_tap_loop_notes(void)
 {
@@ -1751,6 +2378,7 @@ int en_tap_loop_notes(void)
         c += loop_count(l);
     return c;
 }
+int en_tap_pad_state(int i) { return (i >= 0 && i < EN_NPAD) ? pad[i].st : 0; }
 #define TAP_BEGIN(n) tap_begin(n)
 #define TAP_END(k, n) tap_end(k, n)
 #else
@@ -1761,80 +2389,75 @@ int en_tap_loop_notes(void)
 static void render_chunk(int32_t *out, uint32_t n, float gain)
 {
     uint32_t j;
-    const float rg = rev_send * rev_in_gain * (1.0f - 0.25f * arcm), eg = echo_send;
+    const float rg = rev_send * rev_in_gain * (1.0f + 0.3f * cd.space.x), eg = echo_send;
+    float ep = 0.0f, ee = 0.0f;
     for (j = 0; j < n; j++)
         mixl[j] = mixr[j] = rsend[j] = esend[j] = 0.0f;
+    layer_begin(n);
     TAP_BEGIN(n);
     render_pad(n);
-    TAP_END(EN_TAP_PAD, n);
+    layer_done(L_PAD, n);
+    TAP_END(L_PAD, n);
+    layer_begin(n);
     TAP_BEGIN(n);
     render_bass(n);
-    TAP_END(EN_TAP_BASS, n);
+    layer_done(L_BASS, n);
+    TAP_END(L_BASS, n);
+    layer_begin(n);
     TAP_BEGIN(n);
     render_bells(n);
-    TAP_END(EN_TAP_BELLS, n);
+    layer_done(L_BELLS, n);
+    TAP_END(L_BELLS, n);
+    layer_begin(n);
     TAP_BEGIN(n);
+#if EN_PULSE
     render_drums(n);
-    TAP_END(EN_TAP_PULSE, n);
+#else
+    render_ground(n);
+#endif
+    layer_done(L_GROUND, n);
+    TAP_END(L_GROUND, n);
     for (j = 0; j < n; j++) {
-        float wl, wr, l, r, el, er, xl, xr;
+        float wl, wr, l, r, el, er, xl, xr, al, ar, pl, pr;
         echoes(esend[j] * eg, &el, &er, &xl, &xr);
         reverb((rsend[j] * rg + (el + er + xl + xr) * 0.35f * rev_send) * 0.8f, &wl, &wr);
-#ifdef EN_HOST
-        {
-            double a = (double)(0.75f * el + 0.3f * xl), b = (double)(0.75f * er + 0.3f * xr);
-            double c = (double)(1.3f * wl), d = (double)(1.3f * wr);
-            en_tap_echo += a * a + b * b;
-            en_tap_plate += c * c + d * d;
-        }
-#endif
-        l = (mixl[j] + 0.75f * el + 0.3f * xl + 1.3f * wl) * 0.36f * gain;
-        r = (mixr[j] + 0.75f * er + 0.3f * xr + 1.3f * wr) * 0.36f * gain;
+        al = 0.75f * el + 0.3f * xl;
+        ar = 0.75f * er + 0.3f * xr;
+        pl = 1.3f * wl;
+        pr = 1.3f * wr;
+        ee += al * al + ar * ar;
+        ep += pl * pl + pr * pr;
+        l = (mixl[j] + al + pl) * 0.36f * gain;
+        r = (mixr[j] + ar + pr) * 0.36f * gain;
         out[2 * j] = (int32_t)(fm_tanhf(l) * 8300000.0f);
         out[2 * j + 1] = (int32_t)(fm_tanhf(r) * 8300000.0f);
     }
+    cd.e_echo += ee;
+    cd.e_plate += ep;
+    cd.frames += n;
 #ifdef EN_HOST
+    en_tap_echo += (double)ee;
+    en_tap_plate += (double)ep;
     en_tap_frames += n;
 #endif
 }
 
-/* the arc: a slow tide, minutes long, between sparse (-1) and full (+1); Motion sets how far it goes */
-static float arc, arc_tgt;
-static uint32_t arc_left;
-
-static void control(uint32_t n)                 /* once a chunk: the slow things */
+static void control(uint32_t n)                 /* once a chunk: the fast things; the conductor on its step */
 {
     int i;
     mods_step(n);
     heads_step(n);
-    if (arc_left <= n) {
-        float r = frand() * 2.0f - 1.0f;
-        arc_tgt = r * (0.6f + 0.4f * frand()) + (r > 0.0f ? 0.25f : -0.25f);   /* away from the middle */
-        arc_left = (uint32_t)((50.0f + 100.0f * frand()) * EN_SR);
-    } else {
-        arc_left -= n;
-    }
-    if (en_playing)
-        arc += (fm_clampf(arc_tgt, -1.0f, 1.0f) - arc) * (float)n * (1.0f / (35.0f * EN_SR));
-    arcm = arc * motion;
-    en_arc = arcm;
     pl_decay += ((en_frozen ? 0.9995f : pl_decay_t) - pl_decay) * 0.002f;
     pl_dd2 = fm_clampf(pl_decay + 0.15f, 0.25f, 0.5f);
     rev_in_gain += ((en_frozen ? 0.0f : 1.0f) - rev_in_gain) * 0.01f;
-    if (en_playing && !en_frozen && !change_pending) {
-        drift_left -= (float)n;
-        if (!fifth_done && drift_left < 0.5f * drift_total) {
-            fifth_done = 1;                      /* halfway: the bass may lean on the fifth */
-            if (frand() < (float)par[P_FIFTH] * 0.01f && chord_nt >= 3)
-                bass_to(chord_pcs[2]);
-        }
-        if (drift_left <= 0.0f)
-            change_pending = 1;
+    cd.acc += n;
+    while (cd.acc >= CTRL_N) {
+        cd.acc -= CTRL_N;
+        conductor_step();
     }
-    en_drift = drift_total > 0.0f ? 1.0f - fm_clampf(drift_left / drift_total, 0.0f, 1.0f) : 0.0f;
     for (i = 0; i < EN_NLOOP; i++)
         en_loop_glow[i] *= 0.985f;
-    for (i = 0; i < EN_NDRUM; i++)
+    for (i = 1; i < EN_NDRUM; i++)
         en_drum_glow[i] *= 0.95f;
 }
 
@@ -1857,16 +2480,20 @@ void en_render(int32_t *out, uint32_t n, uint32_t gain_q12)
         }
         if (k > n)
             k = n;
+#if EN_PULSE
         {
             int32_t w = drums_wait();            /* a swung hit lands on its sample */
             if (w > 0 && (uint32_t)w < k)
                 k = (uint32_t)w;
         }
+#endif
         if (timed)
             pulse_left -= (float)k;
         control(k);
         render_chunk(out, k, gain);
+#if EN_PULSE
         drums_wait_step((int32_t)k);
+#endif
         out += 2 * k;
         n -= k;
     }

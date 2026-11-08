@@ -358,3 +358,73 @@ control layer to replace is small and well delimited: `control()` (1716-1750), t
 scheduling, `chord_change` and `loop_target`. Everything DESIGN adds (walkers, governor, timbre cursor, harmonic
 fields) sits where these are, feeding the same `apply()` targets or new engine-internal ones, and the seeded,
 sample-exact structure means desktop renders will match the device.
+
+## 11. TIDE Phase 3: the conductor (2026-11-08)
+
+AMB-1's control layer is gone from `app/dsp/amb.c`: the arc (`arc`, `arcm`, `control()`'s retargeting), the pad's
+scheduled breath (`breath()`, `BREATH[]`, `START_T[]`, `pad_breathe`), the 1 s `pad_leave` fades at chord changes,
+the Drift timer (`drift_secs`) and the pulse's calls (its code is kept under `#if EN_PULSE`, default 0). The DSP
+(`render_pad`'s voices, `render_bells`, `render_bass`, `echoes`, `reverb`), the grid (`tick`), the loops, the
+command queue and the `en_*` state are AMB-1's. What stands in the control layer's place, all in `amb.c`:
+
+- **Walkers** (`walker_t`, `walker_set`, `walk`): Ornstein-Uhlenbeck processes (center, tau in seconds at Drift 1x,
+  sd, bounds), stepped every `CTRL_N` = 2048 samples (46 ms) by `conductor_step()`; `speed` multiplies time, 0
+  holds. `slew()` is the dB rate limiter everything audible goes through.
+- **The conductor's state** `cd`: seasons (`s_speed` 2.3 h, the weather's pace as log2; `s_density` 3.1 h;
+  `s_bright` 1.7 h), weather (`bright` 11 min, `density` 17, `reg` 23 (semitones), `space` 13, `chord` 8 (chord
+  dwell as log2), `pres[4]` 9/14/19/29 min: pad, bells, bass, Ground). `cd.dens` and `cd.br` are the combined
+  density and brightness deviations the rest of the engine reads (`loop_target`, `pad_coefs`, `pad_bus`,
+  `bell_ring`). `conductor_reset()` (from `regrow` and `en_init`) draws them afresh near their centers.
+- **Drift** (`P_DRIFT`): `drift_speed(v)` = 2^((v−50)/25), 0 = Hold (text "Hold", "0.50x"; the screen reader says
+  "0.50 times"). The weather runs at `speed × 2^s_speed`; seasons and the note-level walkers at `speed`. At Hold the
+  walkers, the chord dwell, the cells' mutation (`loop_pass` returns), the pad's entrances and leaves and the
+  governor's trim and biases all stop. Freeze holds the same things (and the plate, as before).
+- **The pad as a layer** (`pad_step`, `pad_enter`, `pad_note_on`, `pad_leave`, `pad_handoff`): a voice is
+  `PV_OFF`, `PV_ON` or `PV_OUT`. The conductor wants 0..3 voices from the pad's presence (`want` crosses 0.3, 0.6,
+  0.85; `cd.dens` and the Density knob shift it; `pad_thin` takes one away when the pad has led). Entrances are at
+  least 10 s apart; a voice enters from −45 dB at 0.4 dB/s on its note of the chord, sized by the governor's headroom
+  (`base_db` −14..0), breathes on three level walkers (`lw[3]`, tau 25/47/90 s × `VOICE_K[i]`, sd from Swell:
+  0.6 + 0.02·Swell dB each), stays 60–300 s, dissolves (`PV_OUT`) at 0.2–0.3 dB/s to −50 dB, rests 20–60 s. A chord
+  change sends a voice on a note the new chord lacks to `PV_OUT` (never bent); a voice on a shared note holds. When
+  every voice is dissolving, the faintest below −30 dB may take the new note from where it is. The player's key
+  changes (piece, root, pool, colour) still cross over in 1 s (`pad_handoff`, `hand`/`hf`). `crest` (how far above
+  its base a voice is) feeds the vowel and the Rhodes index, both rate-limited (`vowel`, `idx` in `pad_coefs`).
+  `en_pad_amp[]` is the voice's amplitude as before; `en_cond[CD_PAD_VOICES]` the count singing.
+- **The bass** (`bass_step`): presence < 0.3 rests it, > 0.4 brings it back; its level is two walkers (tau 40/95 s)
+  through `slew` at 0.4 dB/s up, 0.25 down (6 dB/s after Stop). **Ground** (`ground_step`, `render_ground`): the
+  chord's root at MIDI 24+pc (C1..B1), two sines 4 cents apart plus its octave and a little of its twelfth; enters
+  when presence > 0.65 and the gap (180–420 s) has passed, 0.3 dB/s up, 0.2 down, stays 120–300 s or until presence
+  < 0.5 (its presence walker centers on 0.3, so it is above 0.65 about 12% of the time; at 0.25/0.72 it never came in
+  four hours of Garden, nor at 0.3/0.65 with that seed, so when it is overdue, 40-70 weather minutes since it left,
+  its presence is called up at 0.01/s until it enters: rare, never absent). It uses the pulse's slot: `P_PULSE` is its level, `EN_TAP_PULSE` its tap, MIDI channel 3 (0x93).
+- **The governor** (`governor_step`): per step, each layer's dry energy (from `layer_done`, every layer renders into
+  `lyl/lyr` first) plus the plate's and the echoes' returns shared out in proportion to the sends (`SEND_R`,
+  `SEND_E`), smoothed 20 s (`e20[]`, `m20`; `m60` for the CSV). Loudness: `target` = −18 + 0.15·(Density−40) dB on
+  the engine's scale (per-channel mean square before the output gain); outside ±1 dB the `trim` (−12..+9) moves at
+  0.1 dB/s and multiplies every layer's gain, thins the loops (`loop_target`), the pad (`cd.dens`) and the echo
+  feedback (`echo_fb_eff`). Shares: among three or more sounding layers a layer over 45% gets a `bias` down to −8 dB
+  (proportional, 0.06 dB/s); a layer that has led (> 50%) for three minutes calls the resting layers' presence up;
+  `pad_thin`. `gdb[]`/`g[]` are each layer's trim + bias, slewed at 0.16 dB/s, applied in the renders.
+- **The rate budget** (DESIGN §6): voice 0.4 + trim 0.1 + bias 0.06 dB/s, under the 0.75 dB/s that 1.5 dB in 2 s
+  allows, leaving room for the plate's own ripple (~0.2 dB/s on a held note). To get there AMB-1's tape wobbles on
+  the pad (`mod[0..5]`) run four times slower (28–160 s), the pad's pitch drift is ±2 cents (was ±4), the pad's
+  reverb and echo sends come from the unpanned sum (`padm`, ×1.35) and its echo send is 0.1 (was 0.2).
+- **Chords**: `drift_total` = 90 s × 2^chord × (0.7..1.3) in weather seconds (`drift_left -= dt × wspeed`); the
+  bass's fifth lean halfway through stays. Garden (Drift 25 = half speed) dwells 2–5 min; AMB-1 dwelt 20 s–5 min
+  (39 s at Garden's setting).
+- **Layer gains**: pad 0.36 (AMB-1 0.5), bells 0.8 (0.62), bass 0.6 (0.42), Ground 0.5, so the recipes start nearer
+  parity and the governor has room.
+- **Exports**: `en_cond[EN_NCOND]` with `EN_COND_NAME[]` (the walkers, presence, speed, the governor's levels,
+  target, trim, shares, gains, the pad's wanted and singing counts, Ground's level, the opening); `en_ground_level`;
+  `en_arc` now carries `cd.dens`; `en_drum_glow[0]` carries Ground's level for the screen's fourth meter. Host only:
+  `en_host_mute(layer, on)` mutes a layer after the governor has heard it (solo renders), `en_tap_pad_state(i)`.
+- **The opening**: from silence, the first voice starts at −12 dB and the slews run at 2 dB/s for 30 s
+  (`cd.opening`), so power-on sounds within seconds; the Definition of done leaves the first 2 minutes out.
+- **Tests** (`tests/host/amb_test.c`): the pure parts as before; Drift texts; the chord moves at Drift 100; a voice
+  enters only on a note of the chord and never more than three sing; Drift at Hold holds the weather, the chord and
+  the cells; the pad alone for 15 min stays under the swell limit (its per-second dump goes to
+  `app/build/tests/padalone.txt`); the whole garden for 12 min sits within 3 dB of the governor's target. The
+  reader scenario expects the new Drift wording.
+- **CPU**: not yet measured on the device (Phase 7). Added per block: four layer buffers summed into the mix and
+  squared (about 6 operations a sample a layer), the returns squared, and the conductor's step every 2048 samples
+  (a few hundred operations). The pad's mono send bus adds two one-poles a sample.

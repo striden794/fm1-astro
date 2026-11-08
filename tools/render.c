@@ -17,9 +17,10 @@
  *   set Bright 70 | set echo_time 3   a parameter by name (case and spaces/underscores don't matter)
  *   mode Dorian | mode 1          the mode and its pool;  root D | root 2;  pool 0xAAD (bits: root + i semitones)
  *   master 2048                   the MASTER pot's position, 0..4096 (the simulator's default is 2048)
- * --solo mutes the other three layers after every command: a solo render's output is that layer alone,
- * with its own echo and reverb, and generation is unchanged (the levels are applied in the render only),
- * so the four solo renders sum to the mix (up to the output's soft clip). */
+ * --solo mutes the other three layers at the engine's output (en_host_mute: after the governor has
+ * heard them, so generation is unchanged): a solo render's output is that layer alone, with its own echo
+ * and reverb, and the four solo renders sum to the mix (up to the output's soft clip). The pulse slot
+ * is TIDE's Ground layer ("pulse" is kept as its column name). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,13 +41,13 @@ void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2)
     int ch = (int)(st & 0x0Fu), k = -1;
     if ((st & 0xF0u) != 0x90u || d2 == 0)
         return;
-    k = ch == 0 ? 0 : ch == 1 ? 1 : ch == 2 ? 2 : ch == 9 ? 3 : -1;
+    k = ch == 0 ? 0 : ch == 1 ? 1 : ch == 2 ? 2 : (ch == 3 || ch == 9) ? 3 : -1;   /* 3: Ground (TIDE); 9: AMB-1's pulse */
     if (k < 0)
         return;
     notes[k]++;
     if (events)
         fprintf(events, "%.3f %s %u %u\n", (double)frame_now / (double)SR,
-                k == 0 ? "pad" : k == 1 ? "bell" : k == 2 ? "bass" : "pulse", (unsigned)d1, (unsigned)d2);
+                k == 0 ? "pad" : k == 1 ? "bell" : k == 2 ? "bass" : "ground", (unsigned)d1, (unsigned)d2);
 }
 
 /* ------------------------------------------------------------------- WAV --- */
@@ -287,13 +288,11 @@ static void flush(void) { en_render(blk, 0, gain_q12); }   /* drain the command 
 
 static void apply_solo(void)
 {
-    static const int LV[4] = {P_PAD, P_BELLS, P_BASS, P_PULSE};
     int k;
     if (solo < 0)
         return;
     for (k = 0; k < 4; k++)
-        if (k != solo)
-            en_set(LV[k], 0);
+        en_host_mute(k, k != solo);
 }
 
 static void load_piece(int i)
@@ -403,8 +402,10 @@ static void csv_header(void)
           "pad_level,bass_level,pad_amp0,pad_amp1,pad_amp2,pad_amp3,pad_on,bells_on,bass_on,pulse_on,pulse_rest,"
           "layers_on,rms_pad,rms_bells,rms_bass,rms_pulse,rms_echo,rms_plate,rms_out_l,rms_out_r,peak_out,bright_hz,"
           "rsend_pad,rsend_bells,rsend_bass,rsend_pulse,esend_pad,esend_bells,esend_bass,esend_pulse,"
-          "notes_pad,notes_bells,notes_bass,notes_pulse,loop_notes",
+          "notes_pad,notes_bells,notes_bass,notes_pulse,loop_notes,pad_st0,pad_st1,pad_st2,pad_st3",
           csv);
+    for (p = 0; p < EN_NCOND; p++)
+        fprintf(csv, ",c_%s", EN_COND_NAME[p]);
     for (p = 0; p < P_NPARAMS; p++) {
         char nm[32];
         fold(en_param_info(p)->name, nm);
@@ -445,7 +446,10 @@ static void csv_row(double t)
             rms(2.0 * en_tap_rsend[EN_TAP_PULSE], fr), rms(2.0 * en_tap_esend[EN_TAP_PAD], fr),
             rms(2.0 * en_tap_esend[EN_TAP_BELLS], fr), rms(2.0 * en_tap_esend[EN_TAP_BASS], fr),
             rms(2.0 * en_tap_esend[EN_TAP_PULSE], fr));
-    fprintf(csv, "%u,%u,%u,%u,%d", notes[0], notes[1], notes[2], notes[3], en_tap_loop_notes());
+    fprintf(csv, "%u,%u,%u,%u,%d,%d,%d,%d,%d", notes[0], notes[1], notes[2], notes[3], en_tap_loop_notes(),
+            en_tap_pad_state(0), en_tap_pad_state(1), en_tap_pad_state(2), en_tap_pad_state(3));
+    for (p = 0; p < EN_NCOND; p++)
+        fprintf(csv, ",%.4f", (double)en_cond[p]);
     for (p = 0; p < P_NPARAMS; p++)
         fprintf(csv, ",%d", en_tap_param(p));
     fputc('\n', csv);
@@ -530,6 +534,7 @@ int main(int argc, char **argv)
         csv_header();
     en_init();
     en_tap_reset();
+    apply_solo();
     total = (uint64_t)(seconds * (double)SR + 0.5);
     next_row = SR;
     frame_now = 0;

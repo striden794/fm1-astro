@@ -3,7 +3,7 @@
 wait 200
 listen
 wait 100
-said Garden page: Tempo 72, Evolve 35, Motion 50, Drift 39 seconds. Piece Garden, D Dorian, growing
+said Garden page: Tempo 72, Evolve 35, Motion 50, Drift 0.50 times. Piece Garden, D Dorian, growing
 # (the garden follows, queued: the chord, how far to the next, the scale from the root up)
 listen
 where
@@ -36,7 +36,7 @@ wait 300
 said Garden page
 spin K4 20
 wait 300
-said Drift 1 minute 8 seconds
+said Drift 0.87 times
 # HOME + SELECT: the tempo (the Garden's first knob says it)
 press HOME
 turn SELECT 2 200
@@ -112,4 +112,4 @@ wait 1000
 said Tempo 74
 # WHERE: everything again
 where
-said Garden page: Tempo 74, Evolve 35, Motion 50, Drift 1 minute 8 seconds. Piece Garden, D Dorian, resting
+said Garden page: Tempo 74, Evolve 35, Motion 50, Drift 0.87 times. Piece Garden, D Dorian, resting
