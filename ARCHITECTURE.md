@@ -210,6 +210,7 @@ Tooling lives in the project folder, outside `tide/`:
 # Git Bash, from fm1-ambient/
 export PATH="$PATH:/c/Users/tomorrowsman/AppData/Local/Programs/GIMP 3/bin"
 export CC="$(pwd -W)/tools/ccshim/cc.exe" PYTHON=python
+export PYTHONUTF8=1      # build.py rewrites firmware.json; without this, Windows' default code page mangles its "ü"
 cd tide
 python base/tools/build.py app --host        # app/build/host/amb_host (the whole app, scripted)
 sh tests/run_tests.sh                        # engine test + 8 scenarios (emulator tests skipped: no emcc)
