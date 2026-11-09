@@ -7,7 +7,10 @@
  *
  *   cc -O2 -ffp-contract=off -std=c99 -DEN_HOST -Iapp/dsp -Ibase/include -o render tools/render.c app/dsp/amb.c -lm
  *   render --script knobs.txt --seconds 14400 --wav out.wav --csv out.csv [--master 2048] [--bits 16|24]
- *          [--solo pad|bells|bass|pulse] [--events out.txt] [--quiet]
+ *          [--solo pad|bells|bass|pulse] [--events out.txt] [--env out.env] [--quiet]
+ * --env writes the output's mean square (L and R averaged) every 100 ms, one value a line: the envelope at
+ * 10 Hz for the report's modulation spectrum (the per-second CSV aliases the plate's 0.7 Hz ripple to 3.3
+ * and 9.4 s; found 2026-11-09).
  *
  * The knob log: one command a line, an optional time first (seconds, m:ss, h:mm:ss, or 90s/5m/2h; a line
  * without a time keeps the last one), '#' comments.
@@ -17,10 +20,13 @@
  *   set Bright 70 | set echo_time 3   a parameter by name (case and spaces/underscores don't matter)
  *   mode Dorian | mode 1          the mode and its pool;  root D | root 2;  pool 0xAAD (bits: root + i semitones)
  *   master 2048                   the MASTER pot's position, 0..4096 (the simulator's default is 2048)
- * --solo mutes the other three layers at the engine's output (en_host_mute: after the governor has
- * heard them, so generation is unchanged): a solo render's output is that layer alone, with its own echo
- * and reverb, and the four solo renders sum to the mix (up to the output's soft clip). The pulse slot
- * is TIDE's Ground layer ("pulse" is kept as its column name). */
+ *   plate_exc 0.5                 host only: the plate's modulation depth, 0..1 of AMB-1's (an A/B for the ear)
+ * --solo mutes the other three layers (en_host_mute: their dry sound and their sends), so a solo render's output
+ * is that layer alone with its own echo and reverb, and the four solo renders sum to the mix (up to the output's
+ * soft clip). The governor would then hear a thinner garden than in the mix pass and the passes would drift apart
+ * (found 2026-11-09: within a minute), so the mix pass writes its plate and echo meter energies (--meter-out) and a
+ * solo pass replays them into the governor (--meter-in): same generation, same music, in every pass. The pulse
+ * slot is TIDE's Ground layer ("pulse" is kept as its column name). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -279,7 +285,7 @@ static int find_piece(const char *name)
 
 /* ------------------------------------------------------------------ state --- */
 static int solo = -1;                           /* -1 all; else EN_TAP_* kept, the others muted */
-static int piece_now = -1, root_now = 2, mode_now = 1, anchor_now;
+static int piece_now = -1, root_now = 2, mode_now = 1;
 static uint32_t gain_q12 = 1024;                /* APP_GAIN(2048): the simulator's default MASTER */
 static int32_t blk[2 * BLOCK];
 static int quiet;
@@ -309,7 +315,6 @@ static void load_piece(int i)
     piece_now = i;
     root_now = v[P_ROOT];
     mode_now = v[P_MODE];
-    anchor_now = v[P_PADTONE];
 }
 
 static int run_cmd(const char *text, double t)
@@ -352,8 +357,8 @@ static int run_cmd(const char *text, double t)
             mode_now = atoi(b);
             en_pool(EN_MODE_POOL[(unsigned)mode_now < EN_NMODES ? mode_now : 0]);
         }
-        if (p == P_PADTONE)
-            anchor_now = atoi(b);
+    } else if (!strcmp(c, "plate_exc")) {       /* host only: the plate's modulation depth, 0..1 of AMB-1's (TESTING #18) */
+        en_host_plate_exc((float)atof(n >= 2 ? a : "1"));
     } else if (!strcmp(c, "mode")) {
         int m = n >= 2 ? find_name(a, EN_MODE_NAME, EN_NMODES) : -1;
         if (m < 0) {
@@ -393,6 +398,24 @@ static int run_cmd(const char *text, double t)
 static FILE *csv;
 static double e_l, e_r, pk;                     /* the output this second */
 static double d_acc, last_l, last_r;            /* the output's first difference: its rms frequency (brightness) */
+static FILE *envf;                              /* --env: the 100 ms envelope */
+static FILE *meter_out, *meter_in;              /* --meter-out / --meter-in: the governor's plate and echo energies */
+static void meter_hook(float *plate, float *echo)
+{
+    float v[2];
+    if (meter_out) {
+        v[0] = *plate;
+        v[1] = *echo;
+        fwrite(v, sizeof v, 1, meter_out);
+    }
+    if (meter_in && fread(v, sizeof v, 1, meter_in) == 1) {
+        *plate = v[0];
+        *echo = v[1];
+    }
+}
+static double env_e;
+static uint32_t env_frames;
+#define ENV_N 4410u
 static uint64_t frames_row;
 
 static void csv_header(void)
@@ -431,7 +454,7 @@ static void csv_row(double t)
     fprintf(csv, "%.0f,%d,%d,%s,%s,%s,%s %s,%s,%s,%d,%d,%d,%.4f,%.4f,", t, en_playing, en_frozen,
             piece_now >= 0 ? en_piece_name(piece_now) : "-", EN_NOTE_NAME[(root_now % 12 + 12) % 12],
             EN_MODE_NAME[(unsigned)mode_now < EN_NMODES ? mode_now : 0], EN_NOTE_NAME[(root_now % 12 + 12) % 12],
-            EN_MODE_NAME[(unsigned)mode_now < EN_NMODES ? mode_now : 0], anchor_now ? "Voices" : "Rhodes", chord,
+            EN_MODE_NAME[(unsigned)mode_now < EN_NMODES ? mode_now : 0], en_anchor_name(), chord,
             en_chord_root, en_tap_deg(), en_chord_n, (double)en_drift, (double)en_arc);
     fprintf(csv, "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d,%d,%d,%d,", (double)en_pad_level, (double)en_bass_level,
             (double)en_pad_amp[0], (double)en_pad_amp[1], (double)en_pad_amp[2], (double)en_pad_amp[3], pad_on,
@@ -463,13 +486,14 @@ static void csv_row(double t)
 static void usage(void)
 {
     fputs("render --script FILE --seconds N | --hours H [--wav OUT] [--csv OUT] [--events OUT]\n"
-          "       [--master 0..4096] [--bits 16|24] [--solo pad|bells|bass|pulse] [--quiet]\n",
+          "       [--master 0..4096] [--bits 16|24] [--solo pad|bells|bass|pulse] [--env OUT]\n"
+          "       [--meter-out FILE | --meter-in FILE] [--quiet]\n",
           stderr);
 }
 
 int main(int argc, char **argv)
 {
-    const char *script = 0, *wavp = 0, *csvp = 0, *evp = 0;
+    const char *script = 0, *wavp = 0, *csvp = 0, *evp = 0, *envp = 0, *mop = 0, *mip = 0;
     double seconds = 0.0;
     uint64_t total, next_row;
     int i, ci = 0;
@@ -488,6 +512,12 @@ int main(int argc, char **argv)
             csvp = v, i++;
         else if (!strcmp(a, "--events"))
             evp = v, i++;
+        else if (!strcmp(a, "--env"))
+            envp = v, i++;
+        else if (!strcmp(a, "--meter-out"))
+            mop = v, i++;
+        else if (!strcmp(a, "--meter-in"))
+            mip = v, i++;
         else if (!strcmp(a, "--master")) {
             uint32_t m = (uint32_t)atoi(v);
             if (m > 4096u)
@@ -528,6 +558,20 @@ int main(int argc, char **argv)
         fprintf(stderr, "render: cannot write %s\n", evp);
         return 1;
     }
+    if (envp && !(envf = fopen(envp, "w"))) {
+        fprintf(stderr, "render: cannot write %s\n", envp);
+        return 1;
+    }
+    if (mop && !(meter_out = fopen(mop, "wb"))) {
+        fprintf(stderr, "render: cannot write %s\n", mop);
+        return 1;
+    }
+    if (mip && !(meter_in = fopen(mip, "rb"))) {
+        fprintf(stderr, "render: cannot read %s\n", mip);
+        return 1;
+    }
+    if (meter_out || meter_in)
+        en_host_meter_hook = meter_hook;
     if (wav)
         wav_header(wav, 0);
     if (csv)
@@ -544,6 +588,8 @@ int main(int argc, char **argv)
             n = (uint32_t)(total - frame_now);
         if (next_row - frame_now < n)
             n = (uint32_t)(next_row - frame_now);
+        if (envf && ENV_N - env_frames < n)
+            n = ENV_N - env_frames;
         while (ci < ncmds && cmds[ci].at <= frame_now) {
             if (!run_cmd(cmds[ci].text, (double)frame_now / (double)SR))
                 return 1;
@@ -554,6 +600,7 @@ int main(int argc, char **argv)
             double l = (double)blk[2 * j] * (1.0 / 8388608.0), r = (double)blk[2 * j + 1] * (1.0 / 8388608.0);
             e_l += l * l;
             e_r += r * r;
+            env_e += l * l + r * r;
             d_acc += (l - last_l) * (l - last_l) + (r - last_r) * (r - last_r);
             last_l = l;
             last_r = r;
@@ -563,6 +610,11 @@ int main(int argc, char **argv)
                 pk = fabs(r);
         }
         frames_row += n;
+        if (envf && (env_frames += n) >= ENV_N) {
+            fprintf(envf, "%.6e\n", env_e / (2.0 * (double)env_frames));
+            env_e = 0.0;
+            env_frames = 0;
+        }
         wav_write(blk, n);
         frame_now += n;
         if (frame_now == next_row) {
@@ -583,6 +635,12 @@ int main(int argc, char **argv)
         fclose(csv);
     if (events)
         fclose(events);
+    if (envf)
+        fclose(envf);
+    if (meter_out)
+        fclose(meter_out);
+    if (meter_in)
+        fclose(meter_in);
     if (!quiet)
         fprintf(stderr, "\nrender: %.0f s of audio%s%s\n", seconds, wavp ? " -> " : "", wavp ? wavp : "");
     return 0;

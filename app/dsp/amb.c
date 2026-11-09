@@ -331,7 +331,7 @@ const char *const EN_COND_NAME[EN_NCOND] = {
     "bright", "density", "register", "space", "chord", "pres_pad", "pres_bells", "pres_bass", "pres_ground",
     "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
     "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
-    "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff"};
+    "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff", "cursor_x", "cursor_y", "anchor"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told */
@@ -466,9 +466,11 @@ typedef struct {
     float ic[4];                                /* the two filters' states */
     float c1[4], c2[4];                         /* their coefficients: a1, a2, a3, k */
     float vib, pan;
+    float ratio;                                /* FM: the modulator's ratio to the carrier, the nearest anchor's as the note started */
     float hf;                                   /* a handoff's fade: 1 normal */
     uint8_t midi_note, hand;                    /* hand: 1 fading out of the old key, 2 into the new */
-    uint8_t voices;                             /* this stay's colour: 0 Rhodes, 1 Voices */
+    uint8_t voices;                             /* this stay's colour: 0 Rhodes, 1 Voices (the nearest anchor's) */
+    uint8_t land;                               /* the landscape the note was taken from (a change hands the voices over) */
     uint8_t st;                                 /* PV_* */
 } pad_t;
 static pad_t pad[EN_NPAD];
@@ -485,6 +487,97 @@ static void svf_coefs(float *c, float f, float k)
     c[2] = g * c[1];
     c[3] = k;
 }
+
+/* ------------------------------------------------ TIDE: the timbre landscape (DESIGN section 4) --- */
+/* A landscape holds six anchor patches on a unit square, AMB-1's own colour at its center; the timbre
+ * cursor wanders over it on two walkers (a season's region, the weather's drift about it) and never
+ * parks. The continuous parameters are the inverse-distance blend of the anchors (each colour's own,
+ * blended among its own anchors); the discrete ones (the colour, the FM ratio) are the nearest anchor's,
+ * and a voice takes them as its note starts, never mid-note: the voices already sounding keep theirs, so
+ * a change is heard as the voices cross, not as a jump. The brightness walkers (cd.br, each voice's bw)
+ * still move the vowel and the index on top of the cursor. */
+typedef struct {
+    const char *name;
+    uint8_t colour;                             /* 0 Rhodes (FM), 1 Voices (formants) */
+    float ratio;                                /* FM: the modulator's frequency as a ratio of the carrier's */
+    float x, y;                                 /* its place in the landscape */
+    float idx, bloom, h2;                       /* FM: the index (1 = AMB-1's), the crest's bloom (1 = AMB-1's), the second harmonic */
+    float vowel, q, saw;                        /* Voices: the vowel's offset, the formants' width (1 = AMB-1's), the saw's amount */
+    float fc;                                   /* the pad bus's low-pass, octaves from the weather's */
+} anchor_t;
+#define NANCHOR 6
+#define NLAND 2
+static const anchor_t LAND[NLAND][NANCHOR] = {
+    {   /* "Rhodes": AMB-1's Rhodes at the center, its neighbours around it */
+        {"Rhodes", 0, 1.0f, 0.50f, 0.50f, 1.0f, 1.0f, 0.12f, 0.0f, 1.0f, 0.45f, 0.0f},
+        {"Glass", 0, 2.0f, 0.85f, 0.70f, 0.8f, 1.4f, 0.05f, 0.0f, 1.0f, 0.45f, 0.3f},      /* the modulator an octave up: hollow, glassy */
+        {"Reed", 0, 3.0f, 0.20f, 0.85f, 0.55f, 0.8f, 0.0f, 0.0f, 1.0f, 0.45f, -0.2f},      /* a twelfth: odd harmonics, a soft reed */
+        {"Wurli", 0, 1.0f, 0.80f, 0.20f, 1.4f, 1.5f, 0.25f, 0.0f, 1.0f, 0.45f, 0.4f},      /* the same pair, driven harder: a bark */
+        {"Oh", 1, 1.0f, 0.15f, 0.30f, 1.0f, 1.0f, 0.12f, -0.3f, 1.3f, 0.3f, -0.3f},        /* a dark, soft vowel */
+        {"Ah", 1, 1.0f, 0.50f, 0.95f, 1.0f, 1.0f, 0.12f, 0.2f, 0.85f, 0.6f, 0.3f},         /* an open one */
+    },
+    {   /* "Voices": AMB-1's Voices at the center */
+        {"Ah", 1, 1.0f, 0.50f, 0.50f, 1.0f, 1.0f, 0.12f, 0.0f, 1.0f, 0.45f, 0.0f},
+        {"Oh", 1, 1.0f, 0.15f, 0.35f, 1.0f, 1.0f, 0.12f, -0.35f, 1.25f, 0.3f, -0.4f},
+        {"Ee", 1, 1.0f, 0.85f, 0.65f, 1.0f, 1.0f, 0.12f, 0.45f, 0.7f, 0.6f, 0.3f},
+        {"Hum", 1, 1.0f, 0.30f, 0.90f, 1.0f, 1.0f, 0.12f, -0.5f, 1.5f, 0.15f, -0.7f},      /* a closed mouth */
+        {"Glass", 0, 2.0f, 0.80f, 0.15f, 0.7f, 1.2f, 0.05f, 0.0f, 1.0f, 0.45f, 0.2f},
+        {"Rhodes", 0, 1.0f, 0.55f, 0.10f, 1.0f, 1.0f, 0.12f, 0.0f, 1.0f, 0.45f, 0.0f},
+    },
+};
+static int land_now;                            /* the landscape (Pad tone, set by the piece) */
+static struct {
+    walker_t sx, sy, wx, wy;                    /* the season's region and the weather's drift about it */
+    float x, y;                                 /* where the cursor is (0..1) */
+    int near;                                   /* the nearest anchor */
+    float idx, bloom, h2, vowel, q, saw, fc;    /* the blend, rate-limited (brightness is rate-limited too, DESIGN section 6) */
+} tcur;
+
+/* the cursor's blend: inverse-distance weights over the anchors (at an anchor its own weight is ~250 to a
+ * neighbour's ~6, so the anchor is heard nearly pure); init sets the values at once, else they slew */
+static void cursor_blend(int init, float dt)
+{
+    const anchor_t *A = LAND[land_now];
+    float wa = 0.0f, wf = 0.0f, wv = 0.0f, best = 1e9f, d2a[NANCHOR];
+    float idx = 0.0f, bloom = 0.0f, h2 = 0.0f, vowel = 0.0f, q = 0.0f, saw = 0.0f, fc = 0.0f, want[7];
+    float *const val[7] = {&tcur.idx, &tcur.bloom, &tcur.h2, &tcur.vowel, &tcur.q, &tcur.saw, &tcur.fc};
+    int i, near = 0;
+    for (i = 0; i < NANCHOR; i++) {
+        float dx = tcur.x - A[i].x, dy = tcur.y - A[i].y, d2 = dx * dx + dy * dy, w = 1.0f / (d2 + 0.004f);
+        d2a[i] = d2;
+        if (d2 < best) {
+            best = d2;
+            near = i;
+        }
+        wa += w;
+        fc += w * A[i].fc;
+        if (A[i].colour) {
+            wv += w;
+            vowel += w * A[i].vowel;
+            q += w * A[i].q;
+            saw += w * A[i].saw;
+        } else {
+            wf += w;
+            idx += w * A[i].idx;
+            bloom += w * A[i].bloom;
+            h2 += w * A[i].h2;
+        }
+    }
+    if (init || d2a[near] < 0.7f * d2a[tcur.near])   /* a new nearest only when it is clearly nearer: no flicker on a boundary
+                                                      * (178 changes in a fast hour without this, 2026-11-09) */
+        tcur.near = near;
+    want[0] = wf > 0.0f ? idx / wf : 1.0f;
+    want[1] = wf > 0.0f ? bloom / wf : 1.0f;
+    want[2] = wf > 0.0f ? h2 / wf : 0.12f;
+    want[3] = wv > 0.0f ? vowel / wv : 0.0f;
+    want[4] = wv > 0.0f ? q / wv : 1.0f;
+    want[5] = wv > 0.0f ? saw / wv : 0.45f;
+    want[6] = fc / wa;
+    for (i = 0; i < 7; i++)
+        *val[i] = init ? want[i] : slew(*val[i], want[i], 0.01f, 0.01f, dt);   /* a unit in 100 s; the cursor itself is slower */
+}
+
+const char *en_anchor_name(void) { return LAND[land_now][tcur.near].name; }
 
 /* ------------------------------------------------------ TIDE: the conductor's state --- */
 enum { L_PAD, L_BELLS, L_BASS, L_GROUND, NLAYERS };
@@ -509,6 +602,7 @@ static struct {
     float under, silent;                        /* seconds the mix has sat 6 dB under its target; seconds with no layer sounding */
     float share[NLAYERS], lead[NLAYERS];        /* each layer's share of the energy; seconds over the cap */
     uint8_t pad_thin;                           /* the pad has led too long: one voice fewer */
+    float floor_hold;                           /* seconds the ensemble floor's voice is still asked for (a latch) */
     /* the pad */
     int pad_target;
     float since_entry;                          /* seconds since a voice entered */
@@ -529,7 +623,13 @@ static void pad_note_on(pad_t *v, int i)
     if (en_playing && v->midi_note)
         midi(0x80, v->midi_note, 0);
     v->note = v->target;
-    v->voices = (uint8_t)(par[P_PADTONE] != 0);
+    {   /* the discrete set: the nearest anchor's colour and ratio, as the note starts (DESIGN section 4) */
+        const anchor_t *a = &LAND[land_now][tcur.near];
+        v->voices = a->colour;
+        v->ratio = a->ratio;
+        v->land = (uint8_t)land_now;
+        v->ph[1] = v->ph[0];                    /* the modulator in phase with the carrier */
+    }
     v->midi_note = (uint8_t)v->target;
     if (en_playing)
         midi(0x90, v->midi_note, (uint32_t)(50.0f + 40.0f * fm_db2lin(v->base_db)));
@@ -545,10 +645,14 @@ static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floo
     v->rise = 0.4f;                             /* with the governor's 0.16 dB/s this stays under the swell limit;
                                                  * the opening (play from silence) is quicker */
     v->fall = 0.2f + 0.1f * frand();            /* dissolving: 1.3 to 2 times slower than it came */
-    v->ldb = cd.opening > 0.0f ? -12.0f : v->st == PV_OUT ? fm_maxf(v->ldb, -45.0f) : -45.0f;
+    {   /* from -45 dB after the gains: with the trim and the make-up at +15 dB in a thin stretch, a voice appearing at -45
+         * before them was a step the ear and the swell check both caught (2026-11-09, at a pause in the 8 h render) */
+        const float from = -45.0f - fm_maxf(cd.gdb[L_PAD], 0.0f);
+        v->ldb = cd.opening > 0.0f ? -12.0f : v->st == PV_OUT ? fm_maxf(v->ldb, from) : from;
+    }
     v->crest = 0.0f;
-    v->vowel = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x, 0.0f, 1.0f);   /* enters where the weather is */
-    v->idx = 0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f);
+    v->vowel = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + tcur.vowel, 0.0f, 1.0f);   /* enters where the weather and the cursor are */
+    v->idx = (0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx;
     v->hf = 1.0f;
     v->hand = 0;
     v->st = PV_ON;
@@ -571,7 +675,7 @@ static void pad_handoff(void)
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         if (v->st != PV_OFF && v->amp > 0.002f &&
-            ((float)v->midi_note != v->target || v->voices != (par[P_PADTONE] != 0)))
+            ((float)v->midi_note != v->target || v->land != (uint8_t)land_now))
             v->hand = 1;                        /* singing: crosses over; dissolving: goes out with the old key */
         else if (v->st == PV_OFF && !v->hand)
             v->note = v->target;
@@ -634,22 +738,22 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off,
      * its reverb swells or sinks 6-9 dB on its own; and voices drifting apart beat on a chord's coincident
      * harmonics. The tape wow stays where it is heard: on the echo's repeats. */
     f = mtof(v->note);
-    v->inc[0] = f * 0.99856f * (1.0f / EN_SR);  /* -2.5 and +2.5 cents */
-    v->inc[1] = f * 1.00144f * (1.0f / EN_SR);
+    v->inc[0] = f * 0.99856f * (1.0f / EN_SR);  /* -2.5 cents (AMB-1's pair; its second saw is not played) */
+    v->inc[1] = v->inc[0] * v->ratio;           /* FM: the modulator, at the anchor's ratio (Phase 4) */
     /* the vowel: Bright, the weather's brightness, this voice's offset, its crest, and the tape wobble;
      * it moves at most a fiftieth of its range a second (the formants' gain would otherwise swell) */
-    b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v,
-                  0.0f, 1.0f);
+    b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v
+                  + tcur.vowel, 0.0f, 1.0f);   /* + the cursor's vowel (Phase 4) */
     v->vowel = slew(v->vowel, b, 0.02f, 0.02f, 32.0f / EN_SR);
-    v->idx = slew(v->idx, 0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f) + 0.1f * v->crest,
-                  0.01f, 0.01f, 32.0f / EN_SR);
+    v->idx = slew(v->idx, (0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx
+                  + 0.1f * v->crest * tcur.bloom, 0.01f, 0.01f, 32.0f / EN_SR);   /* x the cursor's index and bloom */
     vw = v->vowel * 2.999f;
     a = (int)vw;
     vw -= (float)a;
     f1 = VOWEL[a][0] + (VOWEL[a + 1][0] - VOWEL[a][0]) * vw;
     f2 = VOWEL[a][1] + (VOWEL[a + 1][1] - VOWEL[a][1]) * vw;
-    svf_coefs(v->c1, f1 * (1.0f + 0.03f * (float)i), 0.45f);
-    svf_coefs(v->c2, f2 * (1.0f - 0.02f * (float)i), 0.3f);
+    svf_coefs(v->c1, f1 * (1.0f + 0.03f * (float)i), 0.45f * tcur.q);   /* the formants' width: the cursor's */
+    svf_coefs(v->c2, f2 * (1.0f - 0.02f * (float)i), 0.3f * tcur.q);
 }
 
 static inline float blep_saw(float t, float dt)
@@ -690,6 +794,7 @@ static struct {                                 /* TIDE: the bells as a layer (T
     walker_t lw[2];                             /* it breathes on two summed walkers */
     float rest_t, gap;                          /* weather seconds rested so far; how long this rest lasts */
     float stay_t, min_stay;                     /* weather seconds present so far; the least a stay lasts */
+    float quiet;                                /* seconds since a bell rang: 20 s of none counts as out for the pad's floor */
     uint8_t rest;                               /* sitting out: no bell rings (its presence is low) */
 } bells;
 static int8_t loop_note[EN_NLOOP][EN_LOOP_MAX];
@@ -854,7 +959,8 @@ static void loop_add(int l)
         s = irand(len);
         if (loop_note[l][s] < 0) {
             loop_note[l][s] = (int8_t)rand_offset();
-            loop_vel[l][s] = (uint8_t)(30 + irand(65));           /* TIDE: 0.30..0.94 (AMB-1 0.50..0.99): soft ones too */
+            loop_vel[l][s] = (uint8_t)(25 + irand(56));           /* TIDE: 0.25..0.80 (AMB-1 0.50..0.99, Phase 3b 0.30..0.94):
+                                                                   * the hits Tomorrow's Man timed were the 0.9s (TESTING #14) */
             return;
         }
     }
@@ -961,6 +1067,7 @@ static void bell_voice(int l, int n, float vel, int32_t wait)
 static void bell_ring(int l, int slot)
 {
     int n = bell_note(l, loop_note[l][slot]);
+    bells.quiet = 0.0f;
     float vel = (float)loop_vel[l][slot] * 0.01f;
     int32_t wait = irand(2600);                 /* a human hand: up to 60 ms late */
     bell_voice(l, n, vel, wait);
@@ -1132,6 +1239,8 @@ typedef struct {
 } dl_t;
 static dl_t dl[L_N];
 static float pl_bw, pl_damp_l, pl_damp_r, pl_decay = 0.5f, pl_decay_t = 0.5f, pl_dd2 = 0.5f, lfo_s, lfo_c = 1.0f;
+static float pl_exc_k = 1.0f;                  /* the tank's modulation depth, 1 = Dattorro's 16 samples (host A/B, TESTING #18:
+                                                * on a held pad note it is a 0.7 Hz level ripple of several dB; found 2026-11-09) */
 
 static inline float tap(const dl_t *d, int k)
 {
@@ -1173,13 +1282,13 @@ static inline void reverb(float in, float *ol, float *or_)
         lfo_s = s;
         lfo_c = c;
     }
-    a = allpass_mod(&dl[L_APL], (float)DS(672) + (float)EXC * lfo_s, x + pl_decay * fb_l, -0.7f);
+    a = allpass_mod(&dl[L_APL], (float)DS(672) + (float)EXC * pl_exc_k * lfo_s, x + pl_decay * fb_l, -0.7f);
     push(&dl[L_D1L], a);
     b = tap(&dl[L_D1L], DS(4453));
     pl_damp_l += 0.45f * (b - pl_damp_l);
     b = allpass(&dl[L_AP2L], DS(1800), pl_damp_l * pl_decay, pl_dd2);
     push(&dl[L_D2L], b);
-    a = allpass_mod(&dl[L_APR], (float)DS(908) + (float)EXC * lfo_c, x + pl_decay * fb_r, -0.7f);
+    a = allpass_mod(&dl[L_APR], (float)DS(908) + (float)EXC * pl_exc_k * lfo_c, x + pl_decay * fb_r, -0.7f);
     push(&dl[L_D1R], a);
     b = tap(&dl[L_D1R], DS(4217));
     pl_damp_r += 0.45f * (b - pl_damp_r);
@@ -1401,7 +1510,11 @@ static void apply(int p, int v)
         break;
     case P_EVOLVE: evolve = (float)v * 0.01f; break;
     case P_BTONE: btone = (float)v * 0.01f; break;
-    case P_PADTONE: pad_handoff(); break;        /* the voices cross over as they did for a new key */
+    case P_PADTONE:                              /* the landscape: the voices cross over as they did for a new key */
+        land_now = v < NLAND ? v : NLAND - 1;
+        cursor_blend(1, 0.0f);
+        pad_handoff();
+        break;
     case P_MOTION: motion = (float)v * 0.01f; break;
     case P_BOCT:                                 /* let it be heard now: a bell from the first loop */
         if (en_playing && nsteps) {
@@ -1482,6 +1595,7 @@ static void conductor_reset(void)               /* a new piece: the weather and 
         cd.ff_db0[k] = 0.0f;
     }
     cd.pad_thin = 0;
+    cd.floor_hold = 0.0f;
     cd.pad_target = 0;
     cd.since_entry = 100.0f;
     for (i = 0; i < EN_NPAD; i++) {
@@ -1512,6 +1626,18 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     ground_due = 0.0f;
     ground_due_at = (40.0f + 30.0f * frand()) * 60.0f;
     reg_now = 0;
+    /* the timbre cursor (DESIGN section 4): a season's region, the weather's drift about it; from the center */
+    land_now = par[P_PADTONE] >= 0 && par[P_PADTONE] < NLAND ? par[P_PADTONE] : 0;
+    /* (the first 8 h render, 2026-11-09: a season of sd 0.22 within +-0.4 parked in a corner for hours and the weather
+     * of sd 0.18 could not leave it, 3 anchors in 8 h; now the season shifts the region a little and the weather
+     * does the visiting) */
+    walker_set(&tcur.sx, 0.0f, 2.5f * 3600.0f, 0.15f, -0.25f, 0.25f);
+    walker_set(&tcur.sy, 0.0f, 2.9f * 3600.0f, 0.15f, -0.25f, 0.25f);
+    walker_set(&tcur.wx, 0.0f, 20.0f * 60.0f, 0.25f, -0.45f, 0.45f);
+    walker_set(&tcur.wy, 0.0f, 25.0f * 60.0f, 0.25f, -0.45f, 0.45f);
+    tcur.x = fm_clampf(0.5f + tcur.sx.x + tcur.wx.x, 0.0f, 1.0f);
+    tcur.y = fm_clampf(0.5f + tcur.sy.x + tcur.wy.x, 0.0f, 1.0f);
+    cursor_blend(1, 0.0f);
 }
 
 static int pad_count(void)                      /* voices singing (not dissolving) */
@@ -1545,6 +1671,12 @@ static void governor_step(float dt)
     }
     plate = cd.e_plate * inv;
     echo = cd.e_echo * inv;
+#ifdef EN_HOST
+    if (en_host_meter_hook)
+        en_host_meter_hook(&plate, &echo);   /* the mix pass records what its plate and echoes returned; a solo pass
+                                              * replays it, so the governor hears the same garden and the passes stay
+                                              * in step (the dry energies are the same by construction) */
+#endif
     cd.e_plate = cd.e_echo = 0.0f;
     cd.frames = 0;
     mix = plate + echo;
@@ -1571,7 +1703,8 @@ static void governor_step(float dt)
      * strikes, ±3 dB in minutes; the 60 s one-pole was tried and lags a layer's leaving by minutes) */
     err = cd.level20 - cd.target;
     if (err > 1.5f || err < -1.5f)                /* up at most 0.06 dB/s, down 0.1: too loud is the worse fault */
-        cd.trim = fm_clampf(cd.trim - fm_clampf(err * (1.0f / 6.0f), -1.0f, 1.0f) * (err > 0.0f ? 0.1f : 0.06f) * dt, -12.0f, 9.0f);
+        cd.trim = fm_clampf(cd.trim - fm_clampf(err * (1.0f / 6.0f), -1.0f, 1.0f) * (err > 0.0f ? 0.15f : 0.06f) * dt, -12.0f, 9.0f);   /* down 0.15 dB/s (Phase 4; was 0.1): the overshoot
+                                                                                  * when the layers return to a raised trim */
     /* the make-up for a resting layer (the bells, the bass): the conductor knows what it is taking away, so it
      * gives the energy back as the layer fades (and takes it back as it returns) instead of waiting for the meter.
      * What is missing is the layer's energy as it left (before its gain, so today's gain applies), weighted as the
@@ -1593,6 +1726,10 @@ static void governor_step(float dt)
             miss += K_W[L_BASS] * cd.ff_e0[L_BASS] * cd.g[L_BASS] * cd.g[L_BASS]
                     * (1.0f - fm_db2lin(2.0f * fm_minf(bass.ldb - cd.ff_db0[L_BASS], 0.0f)));
         want = miss > 0.0f ? fm_minf(3.0103f * fm_log2f((cd.m20 + miss) / fm_maxf(cd.m20, 1e-9f)), 6.0f) : 0.0f;
+        want = fm_maxf(want - fm_maxf(err, 0.0f), 0.0f);   /* less whatever the mix is already over its target: the trim had
+                                                            * risen meanwhile too (Phase 4, 8 h render: trim +8 and make-up +5
+                                                            * together as the bass returned, +7 dB over for minutes, the pad
+                                                            * thinned to nothing and the bass alone for an hour) */
         cd.ff = slew(cd.ff, want, 0.15f, 0.15f, dt);   /* the gains' slew (0.16 dB/s) is the budget's guard */
     }
     /* shares: a layer over the cap (45% with three or more layers sounding; none with two) is drawn
@@ -1620,7 +1757,10 @@ static void governor_step(float dt)
         if (err < -1.0f && want < cd.bias[k])
             want = cd.bias[k];                  /* the mix is under its target: no layer is drawn down further */
         cd.bias[k] = slew(cd.bias[k], want, 0.06f, 0.06f, dt);
-        cd.gdb[k] = slew(cd.gdb[k], cd.trim + cd.ff + cd.bias[k], 0.16f, 0.16f, dt);
+        cd.gdb[k] = slew(cd.gdb[k], k == L_BELLS ? fm_minf(cd.trim + cd.ff + cd.bias[k], 3.0f) : cd.trim + cd.ff + cd.bias[k],
+                         0.16f, 0.16f, dt);    /* the bells are struck notes: the governor thins them and turns them down
+                                                * freely but lifts them at most 3 dB (Phase 4: in a thin garden they carried
+                                                * +9 dB at the 95th percentile and +15 at most, Tomorrow's Man's loud lone bells) */
         cd.g[k] = fm_db2lin(cd.gdb[k]);
     }
     if (cd.share[L_PAD] > cap + 0.05f && cd.lead[L_PAD] > 120.0f)
@@ -1672,9 +1812,20 @@ static void pad_step(float dt)
                      + 0.05f * fm_clampf(cd.target - cd.level20, -4.0f, 4.0f), 0.0f, 1.0f);   /* the governor's headroom */
     want_n = want < 0.3f ? 0 : want < 0.6f ? 1 : want < 0.85f ? 2 : 3;   /* about 25% / 38% / 25% / 12% */
     want_n -= cd.pad_thin;
-    if (want_n < 1 && (bells.rest || bells.ldb < -20.0f || bell_vol <= 0.0f) && (bass.rest || bass.ldb < -20.0f || bass_vol <= 0.0f))
+    if ((bells.rest || bells.ldb < -20.0f || bells.quiet > 20.0f || bell_vol <= 0.0f) &&
+        (bass.rest || bass.ldb < -20.0f || bass_vol <= 0.0f))   /* Phase 4: present bells whose sparse loops have rung nothing
+                                                               * for 20 s are out too (2026-11-09: 22 s of silence at 2:06, then a
+                                                               * lone bell at +14 dB) */
+        cd.floor_hold = 60.0f;                  /* and the ask holds a minute: a single bell reset the 20 s and the floor's
+                                                 * voice was sent out a second after it entered, in and out every 20 s */
+    else if (cd.floor_hold > 0.0f)
+        cd.floor_hold -= dt;
+    if (want_n < 1 && cd.floor_hold > 0.0f)
         want_n = 1;                             /* the ensemble floor: a voice at least while the others are out or
-                                                 * still far away (a return from -60 dB at 0.25 dB/s is inaudible for minutes) */
+                                                 * still far away (a return from -60 dB at 0.4 dB/s is inaudible for a minute) */
+    /* (a rule "the pad sings a voice while the bass has led five minutes" was tried on 2026-11-09 and removed the same
+ * day: the bass's energy share is over half whenever the pad thins, so the pad never rested again (0% of 8 h, 2.8 voices:
+ * a bed, Tomorrow's Man's TESTING #7). The bass's share is reported, not tuned: Tomorrow's Man calls it the foundation.) */
     if (want_n < 0)
         want_n = 0;
     if (!en_playing || cd.speed <= 0.0f)
@@ -1756,7 +1907,9 @@ static void bass_step(float dt)
     if (en_playing && cd.speed > 0.0f) {
         if (!bass.rest) {
             bass.stay_t += dt * cd.wspeed;
-            if (cd.pres[L_BASS].x < 0.3f && bass.stay_t >= bass.min_stay) {
+            if (cd.pres[L_BASS].x < 0.3f && bass.stay_t >= bass.min_stay &&
+                !(bell_vol > 0.0f && (bells.rest || bells.ldb < -20.0f))) {   /* not while the bells are out: both away left
+                                                                            * the pad alone for six minutes (Tomorrow's Man, TESTING #15) */
                 bass.rest = 1;
                 bass.rest_t = 0.0f;
                 bass.gap = 120.0f + 180.0f * frand();
@@ -1780,25 +1933,28 @@ static void bass_step(float dt)
      * its way out is already quieter) */
     tgt = en_playing && !bass.rest ? bass.lw[0].x + bass.lw[1].x + 4.0f * fm_clampf((cd.pres[L_BASS].x - 0.6f) * (1.0f / 0.3f), -1.0f, 0.0f)
                                    : -60.0f;
-    bass.ldb = slew(bass.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.25f, en_playing ? 0.25f : 6.0f, dt);   /* a return is as slow as a leave */
+    bass.ldb = slew(bass.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.4f, en_playing ? 0.18f : 6.0f, dt);   /* back quicker than it left
+                                                                   * (Tomorrow's Man, TESTING #15); 0.4 is a pad voice's, inside the rate budget */
     bass.lin = bass.ldb <= -59.0f ? 0.0f : fm_db2lin(bass.ldb);
 }
 
 /* the bells as a layer (Tomorrow's Man, TESTING #11: they were constant, loud and busy): their presence empties the
  * loops as it falls (loop_target) and below 0.3 rests the layer (no bell rings; the ringing ones decay),
  * back above 0.42; the layer's level breathes on two summed walkers, is 6 dB less as its presence falls
- * from 0.6 toward the rest, and comes back from -60 dB at 0.4 dB/s: a return takes two or three minutes */
+ * from 0.6 toward the rest, leaves at 0.18 dB/s and comes back at 0.4 (Phase 4, Tomorrow's Man: up quicker than down) */
 static void bells_step(float dt)
 {
     float tgt;
     walk(&bells.lw[0], cd.speed);
     walk(&bells.lw[1], cd.speed);
+    bells.quiet += dt;                          /* real seconds: a silence is heard in real time */
     /* the rest, as the bass's: after a stay of 4-10 weather minutes at the least, when the presence is under 0.3;
      * 2.5-6 weather minutes once the layer has gone; back whatever the presence says, lifted to 0.42 */
     if (en_playing && cd.speed > 0.0f) {
         if (!bells.rest) {
             bells.stay_t += dt * cd.wspeed;
-            if (cd.pres[L_BELLS].x < 0.3f && bells.stay_t >= bells.min_stay) {
+            if (cd.pres[L_BELLS].x < 0.3f && bells.stay_t >= bells.min_stay &&
+                !(bass_vol > 0.0f && (bass.rest || bass.ldb < -20.0f))) {     /* not while the bass is out (TESTING #15) */
                 bells.rest = 1;
                 bells.rest_t = 0.0f;
                 bells.gap = 150.0f + 210.0f * frand();
@@ -1818,7 +1974,7 @@ static void bells_step(float dt)
     }
     tgt = en_playing && !bells.rest ? bells.lw[0].x + bells.lw[1].x + 6.0f * fm_clampf((cd.pres[L_BELLS].x - 0.6f) * (1.0f / 0.3f), -1.0f, 0.0f)
                                     : -60.0f;
-    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.25f, en_playing ? 0.25f : 6.0f, dt);   /* a return is as slow as a leave */
+    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.4f, en_playing ? 0.18f : 6.0f, dt);   /* back quicker than it left (TESTING #15) */
     bells.lin = bells.ldb <= -59.0f ? 0.0f : fm_db2lin(bells.ldb);
 }
 
@@ -1878,6 +2034,13 @@ static void conductor_step(void)                /* every CTRL_N samples */
     cd.dens = fm_clampf(cd.density.x + cd.s_density.x + fm_clampf(cd.trim * 0.05f, -0.4f, 0.2f), -1.0f, 1.0f);
     cd.br = fm_clampf(cd.bright.x + cd.s_bright.x, -0.6f, 0.6f);
     reg_now = (int)(cd.reg.x + (cd.reg.x >= 0.0f ? 0.5f : -0.5f));
+    walk(&tcur.sx, sp);                         /* the timbre cursor: its region with the seasons, its drift with the weather */
+    walk(&tcur.sy, sp);
+    walk(&tcur.wx, cd.wspeed);
+    walk(&tcur.wy, cd.wspeed);
+    tcur.x = fm_clampf(0.5f + tcur.sx.x + tcur.wx.x, 0.0f, 1.0f);
+    tcur.y = fm_clampf(0.5f + tcur.sy.x + tcur.wy.x, 0.0f, 1.0f);
+    cursor_blend(0, dt);
     echo_fb_eff = fm_clampf(echo_fb + 0.08f * cd.space.x - 0.05f * fm_clampf(-cd.trim * (1.0f / 6.0f), 0.0f, 1.0f), 0.3f, 0.9f);
     governor_step(dt);
     pad_step(dt);
@@ -1923,6 +2086,9 @@ static void conductor_step(void)                /* every CTRL_N samples */
     en_cond[CD_BELLS] = bells.ldb;
     en_cond[CD_BASS] = bass.ldb;
     en_cond[CD_FF] = cd.ff;
+    en_cond[CD_CURSOR_X] = tcur.x;
+    en_cond[CD_CURSOR_Y] = tcur.y;
+    en_cond[CD_ANCHOR] = (float)tcur.near;
 }
 
 static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */
@@ -2169,6 +2335,8 @@ static float mixl[BLK], mixr[BLK], rsend[BLK], esend[BLK];
 static float lyl[BLK], lyr[BLK];                /* the layer being rendered, before it joins the mix */
 #ifdef EN_HOST
 static uint8_t host_mute[NLAYERS];
+void (*en_host_meter_hook)(float *plate, float *echo);   /* the governor's plate and echo energies, recorded or replayed */
+void en_host_plate_exc(float k) { pl_exc_k = fm_clampf(k, 0.0f, 1.0f); }
 void en_host_mute(int layer, int on)
 {
     if (layer >= 0 && layer < NLAYERS)
@@ -2188,7 +2356,7 @@ static void layer_done(int k, uint32_t n)
 #ifdef EN_HOST
     en_tap_dry[k] += (double)e;
     if (host_mute[k])
-        return;
+        return;                             /* a solo render: a muted layer's dry sound stays out of the mix */
 #endif
     for (j = 0; j < n; j++) {
         mixl[j] += lyl[j];
@@ -2211,7 +2379,7 @@ static float plp[6];
 
 static void pad_bus(uint32_t n)
 {
-    const float fc = fm_clampf(700.0f * fm_exp2f(bright * 0.03f + 1.6f * cd.br), 300.0f, 9000.0f);
+    const float fc = fm_clampf(700.0f * fm_exp2f(bright * 0.03f + 1.6f * cd.br + tcur.fc), 300.0f, 9000.0f);   /* + the cursor's octaves */
     const float c = 1.0f - fm_expf(-FM_TWO_PI * fc * (1.0f / EN_SR));
     uint32_t j;
     for (j = 0; j < n; j++) {
@@ -2246,7 +2414,7 @@ static void render_pad(uint32_t n)
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         float p0 = v->ph[0], p1 = v->ph[1], amp = v->amp, s0 = v->ic[0], s1 = v->ic[1], s2 = v->ic[2], s3 = v->ic[3],
-              gl, gr, pn, tgt = 0.0f, idx = 0.0f;
+              gl, gr, pn, tgt = 0.0f, idx = 0.0f, h2 = 0.12f, saw = 0.45f;
         uint32_t j;
         if (amp < 1e-5f && (pad_gain < 1e-4f || v->lin <= 0.0f)) {
             v->amp = 0.0f;
@@ -2262,13 +2430,18 @@ static void render_pad(uint32_t n)
                 pad_coefs(v, i);
                 tgt = v->lin * pad_gain * v->hf;
                 idx = v->idx;                    /* the Rhodes blooms: more overtones as the voice crests (in turns) */
+                h2 = tcur.h2;                    /* the cursor's second harmonic and saw (Phase 4) */
+                saw = tcur.saw;
             }
-            if (!v->voices) {                    /* FM, the modulator at the carrier's pitch: a Rhodes */
-                float m = sine(p0) * idx;
-                x = (sine(p0 + m + 1.0f) + 0.12f * sine(2.0f * p0)) * 1.2f;   /* one carrier: no beating */
+            if (!v->voices) {                    /* FM, the modulator at the anchor's ratio to the carrier (1: a Rhodes) */
+                float m = sine(p1) * idx;
+                x = (sine(p0 + m + 1.0f) + h2 * sine(2.0f * p0)) * 1.2f;   /* one carrier: no beating */
                 p0 += v->inc[0];
                 if (p0 >= 1.0f)
                     p0 -= 1.0f;
+                p1 += v->inc[1];
+                if (p1 >= 1.0f)
+                    p1 -= 1.0f;
                 amp += (tgt - amp) * 0.01f;
                 x *= amp;
                 padl[j] += x * gl;
@@ -2277,7 +2450,7 @@ static void render_pad(uint32_t n)
                 continue;
             }
             /* as Discreet Music's Synthi: a mellow triangle (a sine's neighbour), a little saw in it */
-            x = (p0 < 0.5f ? 4.0f * p0 - 1.0f : 3.0f - 4.0f * p0) * 1.4f + 0.45f * blep_saw(p0, v->inc[0]) + 0.6f * sine(p0);
+            x = (p0 < 0.5f ? 4.0f * p0 - 1.0f : 3.0f - 4.0f * p0) * 1.4f + saw * blep_saw(p0, v->inc[0]) + 0.6f * sine(p0);
             p0 += v->inc[0];
             if (p0 >= 1.0f)
                 p0 -= 1.0f;
@@ -2384,8 +2557,9 @@ static void render_ground(uint32_t n)
 static void render_bells(uint32_t n)
 {
     int i;
-    /* the layer's gain: 0.5 (AMB-1 0.62, Phase 3 0.8: too loud, Tomorrow's Man), the governor's, and the layer's breathing level */
-    const float g = bell_vol * 0.5f * cd.g[L_BELLS] * bells.lin, arate = 0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f);
+    /* the layer's gain: 0.32 (AMB-1 0.62, Phase 3 0.8, Phase 3b 0.5: still too loud in the mix, Tomorrow's Man, TESTING #14,
+     * "at least 35% quieter"), the governor's, and the layer's breathing level */
+    const float g = bell_vol * 0.32f * cd.g[L_BELLS] * bells.lin, arate = 0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f);
     for (i = 0; i < NBELL; i++) {
         bell_t *v = &bell[i];
         float cph = v->cph, mph = v->mph, amp = v->amp, idx = v->idx, att = v->att;
@@ -2523,7 +2697,12 @@ static void tap_end(int k, uint32_t n)
     }
     en_tap_rsend[k] += s;
     en_tap_esend[k] += e;
-    if (host_mute[k]) {
+    if (host_mute[k]) {                     /* a muted layer's sends go too: the solo is the layer with its own echo and
+                                             * reverb. The governor would then hear a thinner garden than in the mix pass
+                                             * and the passes would make different music within a minute (found
+                                             * 2026-11-09: the trim 2-4 dB apart, the pad's voice count differing in two
+                                             * thirds of all seconds): so a solo pass replays the mix pass's plate and
+                                             * echo meter energies into the governor (en_host_meter_hook, render.c) */
         memcpy(rsend, taps, n * sizeof(float));
         memcpy(esend, tape_, n * sizeof(float));
     }

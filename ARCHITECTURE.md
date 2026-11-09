@@ -465,3 +465,81 @@ After Tomorrow's Man's first listening (FINDINGS "Phase 3b"). Where the numbers 
   20 minutes; the loops test tolerates empty loops; the bell-tone test pre-rolls 40 s and counts a minute.
 - **Rate budget**: unchanged in kind. The gains' slew (0.16) now carries trim + make-up + bias; the layers' own
   levels move at 0.25 (bells, bass) or 0.4 (a pad voice).
+
+## 12. TIDE Phase 4: the timbre landscape and cursor, and the retune after Tomorrow's Man's second listening (2026-11-09)
+
+- **The retune** (TESTING #14, #15, in `amb.c`): `render_bells` gain 0.32 (was 0.5; Tomorrow's Man: "at least 35% quieter",
+  the hits he timed were all bells at velocities 0.92–1.03 of 1.10, two or three loops on one beat); `loop_add`
+  velocities 25..80 (was 30..94). `bells_step` and `bass_step` slew 0.4 dB/s up and 0.18 down (was 0.25 both: "a
+  return as slow as a leave"; Tomorrow's Man asked for the opposite, up quicker than down). A rest may not begin while the
+  other of the two is resting or under −20 dB (`bell_vol`/`bass_vol` > 0 only): both away at once left the pad
+  alone for six minutes at 2:30 in the Phase 3b Garden render, the stretch Tomorrow's Man called static.
+- **The landscape** (`anchor_t`, `LAND[NLAND][NANCHOR]`, `land_now`, `tcur`, `cursor_blend`, `en_anchor_name`):
+  two landscapes of six anchors on a unit square, selected by `P_PADTONE` (0 "Rhodes", 1 "Voices"; the texts are
+  unchanged). An anchor: colour (0 FM, 1 formants), FM ratio, place, and the continuous set (FM: `idx` × AMB-1's
+  index, `bloom` × the crest's 0.1, `h2` the second harmonic (AMB-1 0.12); Voices: `vowel` offset, `q` × the
+  formants' k (0.45/0.3), `saw` (AMB-1 0.45); both: `fc` in octaves on the pad bus's low-pass). The cursor
+  `tcur.x/y` = 0.5 + a season walker (`sx`/`sy`: tau 2.5/2.9 h, sd 0.15, ±0.25) + a weather walker (`wx`/`wy`: tau
+  20/25 min, sd 0.25, ±0.45), the seasons at Drift's speed and the weather at the weather's, clamped 0..1. (The
+  first 8 h render had the season at sd 0.22 within ±0.4 and the weather at 0.18 within ±0.35: the season parked in
+  a corner for hours and the cursor visited 3 anchors in 8 h, Wurli 72% of the time; with the season small and the
+  weather wide it visited all 6 in 4 h of either piece and in 8 h.)
+  `cursor_blend` weights each anchor 1/(d² + 0.004) (an anchor's own weight ~250 against a neighbour's ~6), blends
+  the FM set over the FM anchors and the Voices set over the Voices anchors, `fc` over all, and slews each value
+  at 0.01/s (`init` sets them at once: a piece change, `P_PADTONE`); the nearest anchor changes only when another is
+  nearer by d² < 0.7× (hysteresis: 178 changes in a fast hour without it, 45 with). `pad_note_on` takes the
+  nearest anchor's colour and ratio into the voice (`v->voices`, `v->ratio`, `v->land`) and puts the modulator in
+  phase with the carrier; `pad_handoff` crosses the voices when `v->land` differs from the landscape. `pad_coefs`:
+  `inc[1]` = `inc[0]` × ratio (the modulator; AMB-1's second saw was never played), the vowel target + `tcur.vowel`,
+  the index target × `tcur.idx` with the crest × `tcur.bloom`, the formants' k × `tcur.q`; `render_pad` reads
+  `tcur.h2` and `tcur.saw` every 32 samples and the FM branch runs the modulator on `ph[1]`; `pad_bus` adds
+  `tcur.fc` to the low-pass's exponent. Exports: `en_cond[CD_CURSOR_X/Y]`, `en_cond[CD_ANCHOR]` (the index),
+  `en_anchor_name()` (the harness's `anchor` column; `render.c` no longer maps Pad tone to a name).
+- **The governor** (second round, after the first Phase 4 Garden render): the bells' gain target is capped at +3 dB
+  (`gdb[L_BELLS]`; the trim and make-up had lifted them +9 dB at the 95th percentile and +15 at most in thin
+  stretches, undoing the 0.32 and making Tomorrow's Man's loud lone bells); `bells.quiet` counts real seconds since a bell
+  rang and over 20 s counts the bells as out for the pad's ensemble floor (22 s with nothing sounding at 2:06 in
+  that render, the pad at no voice, the bass resting, the bells present but their loops sparse); the trim comes
+  down at 0.15 dB/s (was 0.1; the mix overshot +4 to +6 dB on the engine's meter as the layers returned to a
+  raised trim). Third round, after the second 8 h render: the make-up's target is reduced by whatever the mix is
+  already over its target (`want -= max(err, 0)`; trim +8 and make-up +5 had stacked as the bass returned, +7 dB over
+  for minutes, the pad thinned to nothing by the governor's headroom term and the bass alone for an hour). A rule
+  "the pad sings a voice while the bass has led five minutes" was tried in that round and removed: the bass's energy
+  share is over half whenever the pad thins, so the pad never rested (0% of 8 h), a bed again. Fourth round, after
+  the in-step solo renders showed the pad's fastest moves at a pause: the ensemble floor's ask is a 60 s latch
+  (`cd.floor_hold`; a single bell reset `bells.quiet` and the floor's voice was sent out a second after it entered,
+  in and out every 20 s), and a pad voice enters at −45 dB *after* the gains (`pad_enter`: `from` = −45 −
+  max(gdb[L_PAD], 0); with the trim at +9 and the make-up at +6 an appearance at −45 before them was a step).
+- **The plate's ripple** (found measuring the swell schedule): the tank's two modulated allpasses (`EXC` = 24
+  samples at 0.70 Hz, Dattorro's figures) put a level ripple of several dB at 0.7 Hz on a held pad note (the pad's
+  solo render; the plate is most of the pad's level). Sampled once a second it aliases to 3.3 s and 9.4 s: the
+  "9–10 s peak" of Phases 3–3b. `pl_exc_k` scales the excursion; host only, `en_host_plate_exc(k)` and the
+  harness command `plate_exc k`, for the A/B in `out/phase4/ab-plate/` (TESTING #18). The device's plate is unchanged.
+- **The solo renders kept in step** (`amb.c` host only: `en_host_meter_hook`, called in `governor_step` with the
+  step's plate and echo energies; `tools/render.c` `--meter-out FILE` / `--meter-in FILE`, `meter_hook`;
+  `tools/render.py` runs the mix pass first, then the four solos in parallel with `--meter-in run/meter.bin`): a solo
+  pass still mutes the other layers' dry sound and sends (`layer_done`, `tap_end`: the solo is the layer with its own
+  echo and reverb, and the solos sum to the mix within ±0.2 dB), and its governor hears the mix pass's plate and
+  echo returns instead of its own thinner ones, so every decision is the same (the dry energies are the same by
+  construction) and the five passes' CSV columns are identical. Found on 2026-11-09: until then the governor's trim
+  differed from the mix's within 33–46 s and the passes diverged (the pad's voice count differing in two thirds of
+  all seconds, the solos' energy sum −32 to +10 dB against the mix), so the solo-based figures of Phases 3 and 3b
+  were taken on other performances than the WAV. A first fix that kept the sends in and scaled the returns by each
+  layer's share (by the block's dry energies, then by `e20`) was dropped the same day: a resting layer's first strike
+  was attributed to the pad and read as a 4–9 dB/s swell. 8 floats a conductor step: `meter.bin` is 5 MB for 8 h.
+  Nothing of this is compiled for the device.
+- **The harness** (`tools/render.c`): `--env FILE` writes the output's mean square every 100 ms (`ENV_N` 4410
+  frames, the block cut to the boundary), one value a line; `tools/render.py` asks for `mix.env` and `solo-*.env`;
+  `tools/evolve_report.py` takes the pad's envelope from `solo-pad.env` at 10 Hz when it is there (the same Welch
+  bands by period) and reports the fast ripple (1–4 s) for information; the loudness check is the one-sided band
+  (`loudness_inside_pct` 85, `loudness_over_db` 3, `loudness_under_db` 9; CLAUDE.md, TESTING #17); a figure shows
+  the nearest anchor and the cursor over time.
+- **Tests** (`tests/host/amb_test.c`): the cursor in an hour at Drift 100 changes its nearest anchor at least twice
+  and visits three or more, never leaves the square, the render stays finite and bounded through the anchors and in
+  the Voices landscape; the Hold test covers the cursor's walkers. Two tests made robust to the generator's path:
+  the pad-entrances test runs at Drift 50 (it inherited 100 from the chord test, where a chord moves every 20–45 s
+  and a voice entering at 0.4 dB/s is sent out before it reaches the −20 dB the test counts) and prints the voices
+  per 30 s when it fails; the bell-tone test counts zero crossings per bell struck over two minutes (the loops'
+  random fill had differed 12 to 2 notes between its runs). All pass.
+- **CPU**: per pad voice the FM branch gains one phase accumulator and one table read for the second harmonic's
+  scale (it was a constant); the blend is a few dozen operations every 46 ms. Still unmeasured on the device.

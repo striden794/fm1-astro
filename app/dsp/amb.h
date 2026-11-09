@@ -110,9 +110,11 @@ extern volatile float en_pad_amp[EN_NPAD];     /* and how loud */
 enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_PRES_BELLS, CD_PRES_BASS,
        CD_PRES_GROUND, CD_S_SPEED, CD_S_DENSITY, CD_S_BRIGHT, CD_SPEED, CD_LEVEL20, CD_LEVEL60, CD_TARGET, CD_TRIM,
        CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
-       CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF, EN_NCOND };
+       CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF,
+       CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, EN_NCOND };
 extern const char *const EN_COND_NAME[EN_NCOND];
 extern volatile float en_cond[EN_NCOND];
+const char *en_anchor_name(void);              /* TIDE: the timbre cursor's nearest anchor (Phase 4) */
 
 /* the pure parts, for the tests and the screen */
 uint32_t en_euclid(int k, int n, int rot);     /* Bjorklund's pattern, as a bitmask (bit 0 = step 0) */
@@ -144,6 +146,10 @@ int en_tap_bells_on(void);                     /* bell voices sounding */
 int en_tap_drums_on(void);                     /* Ground sounding (the pulse's slot) */
 int en_tap_pad_state(int i);                   /* a pad voice: 0 off, 1 singing, 2 dissolving */
 void en_host_mute(int layer, int on);          /* mute a layer's output after the governor has heard it (solo renders) */
+void en_host_plate_exc(float k);               /* the plate's modulation depth, 0..1 of AMB-1's (an A/B, TESTING #18) */
+/* the governor's plate and echo energies each conductor step, to record (the mix pass) or replace (a solo pass):
+ * with the muted layers' sends gone the effects return less, and the governor would steer differently */
+extern void (*en_host_meter_hook)(float *plate, float *echo);
 int en_tap_deg(void);                          /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
 #endif

@@ -178,10 +178,12 @@ int main(void)
      * dissolves); never more than three sing at once */
     {
         int k, i, off_chord = 0, entries = 0, over = 0;
-        float prev[EN_NPAD];
+        float prev[EN_NPAD], vsum[16] = {0};         /* the voices singing, per 30 s: printed when entrances are few */
+        en_set(P_DRIFT, 50);                     /* 1x: at 4x a chord moves every 20-45 s and a voice entering at 0.4 dB/s is
+                                                  * sent out again before it reaches the -20 dB this test counts (2026-11-09) */
         for (i = 0; i < EN_NPAD; i++)
             prev[i] = en_pad_amp[i];
-        for (k = 0; k < 480 * 4; k++) {
+        for (k = 0; k < 1200 * 4; k++) {        /* 20 min: the pad rests for up to ten minutes by design */
             uint32_t pcs = 0;
             run(0.25f);
             for (i = 0; i < EN_NPAD; i++)
@@ -195,11 +197,19 @@ int main(void)
                 prev[i] = en_pad_amp[i];
             }
             over += en_cond[CD_PAD_VOICES] > 3.0f;
+            vsum[k / 300] += en_cond[CD_PAD_VOICES];
         }
-        CHECK(entries >= 2, "pad entrances in 8 min: %d", entries);
+        if (entries < 2) {
+            printf("  pad voices singing per 75 s:");
+            for (k = 0; k < 16; k++)
+                printf(" %.1f", (double)(vsum[k] / 300.0f));
+            printf("  (presence %.2f, target %.0f, bells %.0f dB, bass %.0f dB, trim %.1f)\n", (double)en_cond[CD_PRES_PAD],
+                   (double)en_cond[CD_PAD_TARGET], (double)en_cond[CD_BELLS], (double)en_cond[CD_BASS], (double)en_cond[CD_TRIM]);
+        }
+        CHECK(entries >= 2, "pad entrances in 20 min: %d", entries);
         CHECK(!off_chord, "%d of %d entrances on a note outside the chord", off_chord, entries);
         CHECK(!over, "more than three pad voices singing at %d moments", over);
-        printf("  pad entrances in 8 min: %d\n", entries);
+        printf("  pad entrances in 20 min: %d\n", entries);
     }
 
     /* the loops evolve: with Evolve at 100, the phrases change */
@@ -257,6 +267,8 @@ int main(void)
         CHECK(diff == 0, "the cells changed %d notes at Hold", diff);
         for (k = CD_BRIGHT; k <= CD_S_BRIGHT; k++)
             moved += fabsf(en_cond[k] - w0[k]) > 1e-6f;
+        moved += fabsf(en_cond[CD_CURSOR_X] - w0[CD_CURSOR_X]) > 1e-6f;   /* Phase 4: the timbre cursor too */
+        moved += fabsf(en_cond[CD_CURSOR_Y] - w0[CD_CURSOR_Y]) > 1e-6f;
         CHECK(moved == 0, "%d walkers moved at Hold", moved);
         CHECK(peak > 0.02f, "silent at Hold (%f)", (double)peak);
         en_set(P_DRIFT, 25);
@@ -311,10 +323,13 @@ int main(void)
         float zc[3];
         int k;
         static const int TONE[3] = {0, 100, 0}, OCT[3] = {0, 0, 2};
+        /* zero crossings per bell struck (the loops' random fill differed 12 to 2 notes between runs on 2026-11-09, and a
+         * minute of two notes is not brighter than a minute of twelve), over two minutes */
         for (k = 0; k < 3; k++) {
             int b2, j;
             long z = 0;
             float prev = 0.0f;
+            uint32_t m0;
             en_init();
             en_set(P_PAD, 0);
             en_set(P_BASS, 0);
@@ -326,7 +341,8 @@ int main(void)
             en_set(P_BOCT, OCT[k]);
             en_play(1);
             run(40.0f);                          /* TIDE: the bells fade in over the opening's 30 s */
-            for (b2 = 0; b2 < 60 * 44100 / 256; b2++) {   /* a minute: the loops carry 1-3 notes each now */
+            m0 = midi_count;
+            for (b2 = 0; b2 < 120 * 44100 / 256; b2++) {   /* two minutes: the loops carry 0-3 notes each now */
                 en_render(buf, 256, 2048);
                 for (j = 0; j < 256; j++) {
                     float x = (float)buf[2 * j];
@@ -334,7 +350,9 @@ int main(void)
                     prev = x;
                 }
             }
-            zc[k] = (float)z;
+            zc[k] = (float)z / (float)(midi_count - m0 > 0u ? midi_count - m0 : 1u);
+            printf("  bells alone, tone %d oct %d: %ld zero crossings in two minutes, %u MIDI messages (%.0f a message); bells at %.1f dB, loops hold %d notes\n",
+                   TONE[k], OCT[k], z, midi_count - m0, (double)zc[k], (double)en_cond[CD_BELLS], en_tap_loop_notes());
         }
         CHECK(zc[1] > 1.5f * zc[0], "Bell tone 100 not brighter: %.0f vs %.0f", (double)zc[1], (double)zc[0]);
         CHECK(zc[2] > 1.4f * zc[0], "Bell oct +2 not higher: %.0f vs %.0f", (double)zc[2], (double)zc[0]);
@@ -480,6 +498,48 @@ int main(void)
         CHECK(back >= 1 || rests == 0, "the bells rested and never came back");
         CHECK(rate_bad == 0, "the bells' level moved over 1 dB/s at %d moments", rate_bad);
         CHECK(!bad, "NaN");
+    }
+
+    /* TIDE Phase 4: the timbre cursor. In an hour of the garden at Drift 100 (4x) the nearest anchor changes at
+     * least twice and three or more anchors are visited; the cursor stays in the landscape; a voice's colour and
+     * ratio are taken as it enters (the render stays bounded and finite through every anchor) */
+    {
+        int s, changes = 0, seen = 0, k, outside = 0;
+        const char *names[16], *last;
+        en_init();
+        en_set(P_DRIFT, 100);
+        en_play(1);
+        run(1.0f);
+        last = en_anchor_name();
+        names[seen++] = last;
+        peak = 0.0f;
+        for (s = 0; s < 3600; s++) {
+            const char *a;
+            run(1.0f);
+            a = en_anchor_name();
+            outside += en_cond[CD_CURSOR_X] < 0.0f || en_cond[CD_CURSOR_X] > 1.0f || en_cond[CD_CURSOR_Y] < 0.0f || en_cond[CD_CURSOR_Y] > 1.0f;
+            if (a != last) {
+                changes++;
+                last = a;
+                for (k = 0; k < seen; k++)
+                    if (names[k] == a)
+                        break;
+                if (k == seen && seen < 16)
+                    names[seen++] = a;
+            }
+        }
+        printf("  the cursor, 1 h at Drift 100: %d anchor changes, %d anchors visited (now %s); peak %.3f\n", changes, seen, last,
+               (double)peak);
+        CHECK(changes >= 2, "the nearest anchor changed %d times in an hour at Drift 100", changes);
+        CHECK(seen >= 3, "only %d anchors visited in an hour at Drift 100", seen);
+        CHECK(outside == 0, "the cursor left the landscape at %d moments", outside);
+        CHECK(!bad && peak < 0.99f, "NaN or clipping through the anchors (peak %f)", (double)peak);
+        /* the Voices landscape too */
+        en_set(P_PADTONE, 1);
+        peak = 0.0f;
+        run(600.0f);
+        CHECK(!bad && peak > 0.02f && peak < 0.99f, "the Voices landscape: peak %f", (double)peak);
+        en_set(P_PADTONE, 0);
     }
 
     /* stop: the tails die away */
