@@ -428,3 +428,40 @@ command queue and the `en_*` state are AMB-1's. What stands in the control layer
 - **CPU**: not yet measured on the device (Phase 7). Added per block: four layer buffers summed into the mix and
   squared (about 6 operations a sample a layer), the returns squared, and the conductor's step every 2048 samples
   (a few hundred operations). The pad's mono send bus adds two one-poles a sample.
+
+### Phase 3b (2026-11-08): the bells and the bass as layers, the governor rebuilt for layers that leave
+After Tomorrow's Man's first listening (FINDINGS "Phase 3b"). Where the numbers above differ, these win:
+- **The bells** (`bells`, `bells_step`): the presence walker (center 0.5, was 0.6; 14 min) feeds `loop_target` as
+  `presf` = (pres − 0.25) / 0.35 clamped 0..1.3 (empty under 0.25), with Density × 0.028 notes a loop (was 0.05),
+  ceiling 4 (was 5), and the trim only thins (`fm_minf(cd.trim, 0)`). Under 0.3, once `stay_t` ≥ `min_stay`
+  (240–600 weather s), the layer rests: `tick` rings nothing, the level target is −60 dB; `rest_t` counts weather
+  seconds once `ldb` ≤ −40 and the rest ends at `gap` (150–360 s), the presence lifted to 0.42, a new `min_stay`
+  drawn. Level: two walkers (55 / 130 s, sd 0.65 × the Swell sd, ±8) + 6 dB × clamp((pres − 0.6) / 0.3, −1, 0),
+  slewed 0.25 dB/s both ways (the opening 2.0), applied in `render_bells` with the gain 0.5 (was 0.8). `loop_add`
+  draws velocities 30..94 (was 50..99); `loop_pass` sits a loop out with probability 0.1 + 0.25 × Evolve (was
+  0.15 × Evolve); `rand_offset` sends a chord tone an octave down 20% of the time (encoded as `OFF_DOWN` + o, decoded
+  in `bell_note`, which also adds `reg_now`: the register walker moves the bells with the pad). `en_cond[CD_BELLS]`
+  is the layer's level in dB.
+- **The bass** (`bass_step`): the same rest shape (`min_stay` 300–720 weather s, `gap` 120–300 after −40 dB, back
+  with presence ≥ 0.4), walkers 80 / 190 s (was 40 / 95) with sd 0.56 × the Swell sd (was 0.5 ×), ±8 (was ±5), a
+  4 dB presence tie, 0.25 dB/s up (was 0.4). `en_cond[CD_BASS]`.
+- **The pad**: level walkers 39 / 73 / 140 s (was 25 / 47 / 90), sd 0.7 + 0.023 × Swell (was 0.6 + 0.02), ±8 (was
+  ±6): deeper at the same dB/s. `pad_enter`: `base_db` = −6 + 4r + 0.4 × clamp(target − level20, ±4) (was 0.8 ×,
+  unclamped); the 3 dB trim knock at an entrance is gone. `pad_step`: `want_n` ≥ 1 while the bells and the bass are
+  resting or under −20 dB (the ensemble floor's pad half).
+- **The governor** (`governor_step`): `K_W` = {1.0, 1.6, 0.45, 0.3} (bass was 0.8, Ground 0.5); `target` = −22 +
+  0.15 × (Density − 40) (was −18); the trim moves on the 20 s meter outside ±1.5 dB (was ±1) at 0.06 dB/s up and
+  0.1 down (was 0.1 both); the presence calls (a leading layer, a thin garden) are gone; `wshare[]` are the layers'
+  K-weighted shares; the **make-up** `ff`: at a rest's start `ff_e0[k]` = e20[k] / g[k]² and `ff_db0[k]` = the level,
+  each step `miss` = Σ K_W[k] × ff_e0[k] × g[k]² × (1 − 10^((ldb − db0)/10)) over the resting bells and bass,
+  `want` = 10 log10((m20 + miss) / m20) capped at 6 dB, slewed 0.15 dB/s, added to every layer's gain (`gdb` =
+  trim + ff + bias, still slewed 0.16: the rate budget's guard); `ff_e0` clears when the layer is back within 3 dB
+  of where it left. The **ensemble floor**: `under` counts seconds with the meter 6 dB or more under the target,
+  `silent` seconds with no layer (pad, bells, bass) above −30 dB; at 60 s or 10 s one resting layer is recalled (the
+  bass, then the bells, each with presence lifted over its threshold; else the pad's presence to 0.65), then 180 s of
+  grace. `en_cond[CD_FF]`.
+- **Tests** (`tests/host/amb_test.c`): the bells rest at least once and return in 2 h at Drift 50 and their level
+  never moves over 1 dB/s; the garden's 60 s level is within 3 dB of the target for at least three quarters of
+  20 minutes; the loops test tolerates empty loops; the bell-tone test pre-rolls 40 s and counts a minute.
+- **Rate budget**: unchanged in kind. The gains' slew (0.16) now carries trim + make-up + bias; the layers' own
+  levels move at 0.25 (bells, bass) or 0.4 (a pad voice).

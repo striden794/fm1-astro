@@ -331,7 +331,7 @@ const char *const EN_COND_NAME[EN_NCOND] = {
     "bright", "density", "register", "space", "chord", "pres_pad", "pres_bells", "pres_bass", "pres_ground",
     "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
     "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
-    "pad_target", "pad_voices", "ground", "opening"};
+    "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told */
@@ -504,6 +504,9 @@ static struct {
     float e20[NLAYERS], m3, m20, m60;           /* smoothed: each layer, the mix */
     float level20, level60, target;             /* dB */
     float trim, bias[NLAYERS], gdb[NLAYERS], g[NLAYERS];   /* the trim, each layer's bias, their slewed sum, linear */
+    float ff, ff_e0[NLAYERS], ff_db0[NLAYERS];  /* the make-up for a resting layer: its energy (before its gain) and level as it left */
+    float wshare[NLAYERS];                      /* each layer's share of the meter's (K-weighted) energy */
+    float under, silent;                        /* seconds the mix has sat 6 dB under its target; seconds with no layer sounding */
     float share[NLAYERS], lead[NLAYERS];        /* each layer's share of the energy; seconds over the cap */
     uint8_t pad_thin;                           /* the pad has led too long: one voice fewer */
     /* the pad */
@@ -535,8 +538,9 @@ static void pad_note_on(pad_t *v, int i)
 static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floor, at the swell limit */
 {
     int k;
-    /* its size: scaled by the governor's headroom (the target less the mix's level now), -14..0 dB */
-    v->base_db = fm_clampf(-6.0f + 4.0f * frand() + 0.8f * (cd.target - cd.level20), -14.0f, 0.0f);
+    /* its size: -6..-2 dB, moved a little by the governor's headroom (the target less the mix's level now): the trim
+     * and the make-up answer the same deficit, so the voice's own share of it is small (Phase 3: 0.8 per dB) */
+    v->base_db = fm_clampf(-6.0f + 4.0f * frand() + 0.4f * fm_clampf(cd.target - cd.level20, -4.0f, 4.0f), -14.0f, 0.0f);
     v->stay = 60.0f + 240.0f * frand();
     v->rise = 0.4f;                             /* with the governor's 0.16 dB/s this stays under the swell limit;
                                                  * the opening (play from silence) is quicker */
@@ -552,8 +556,9 @@ static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floo
         v->lw[k].x = fm_clampf(0.5f * v->lw[k].sd * gauss(), v->lw[k].lo, v->lw[k].hi);
     pad_note_on(v, i);
     cd.since_entry = 0.0f;
-    if (cd.trim > 0.0f)                         /* the governor hears it coming: a raised trim gives 3 dB back now */
-        cd.trim = fm_maxf(cd.trim - 3.0f, 0.0f);
+    /* (Phase 3 knocked 3 dB off a raised trim here, "the governor hears it coming"; removed 2026-11-08: with the
+     * gains slewed at 0.16 dB/s every entrance ducked the other layers 3 dB over 20 s, a sawtooth at the pace of the
+     * entrances. The voice's size is already scaled by the headroom; the trim follows the meter.) */
 }
 
 /* a new key (piece, root, scale, colour) from the player: the voices still singing the old one cross
@@ -665,6 +670,8 @@ static struct {
     float ph, inc, note, target, amp;
     float ldb, lin;                             /* TIDE: its level in dB (slewed) and linear */
     walker_t lw[2];
+    float rest_t, gap;                          /* weather seconds rested so far; how long this rest lasts */
+    float stay_t, min_stay;                     /* weather seconds present so far; the least a stay lasts */
     uint8_t midi_note, rest;                    /* rest: sitting out (the conductor's presence) */
 } bass;
 static float bass_vol, glide_k = 1.0f / (0.25f * EN_SR);      /* glide_k: 1 / the glide's time in samples */
@@ -678,6 +685,13 @@ typedef struct {
 } bell_t;
 static bell_t bell[NBELL];
 static float bell_vol, btone;
+static struct {                                 /* TIDE: the bells as a layer (Tomorrow's Man, TESTING #11) */
+    float ldb, lin;                             /* the layer's level in dB (slewed) and linear */
+    walker_t lw[2];                             /* it breathes on two summed walkers */
+    float rest_t, gap;                          /* weather seconds rested so far; how long this rest lasts */
+    float stay_t, min_stay;                     /* weather seconds present so far; the least a stay lasts */
+    uint8_t rest;                               /* sitting out: no bell rings (its presence is low) */
+} bells;
 static int8_t loop_note[EN_NLOOP][EN_LOOP_MAX];
 static uint8_t loop_vel[EN_NLOOP][EN_LOOP_MAX], loop_pos[EN_NLOOP];
 static const uint8_t LOOP_BASE[EN_NLOOP] = {72, 67, 79, 62};     /* each loop's register */
@@ -716,11 +730,19 @@ static void scale_set(void)
     nsteps = en_scale(pool, steps);
 }
 
+static int reg_now;                             /* the register shift (the register walker, whole semitones) */
+#define OFF_DOWN 32                             /* a loop offset of OFF_DOWN + o: the tone o, an octave down */
+
 static int bell_note(int l, int off)            /* a loop slot's note, from the chord's degree */
 {
-    int d = deg + off, oct = d / nsteps, s = steps[d % nsteps], base, root = par[P_ROOT], n;
+    int down = off >= OFF_DOWN, d, oct, s, base, root = par[P_ROOT], n;
+    if (down)
+        off -= OFF_DOWN;
+    d = deg + off;
+    oct = d / nsteps - down;
+    s = steps[d % nsteps];
     base = LOOP_BASE[l] - ((LOOP_BASE[l] - root) % 12 + 12) % 12;   /* the root at or below the register */
-    n = base + s + 12 * oct + 12 * par[P_BOCT];
+    n = base + s + 12 * oct + 12 * par[P_BOCT] + reg_now;           /* the register walker moves the bells too */
     while (n > 103)
         n -= 12;
     while (n < 36)
@@ -728,7 +750,6 @@ static int bell_note(int l, int off)            /* a loop slot's note, from the 
     return n;
 }
 
-static int reg_now;                             /* the pad's register shift (the register walker, whole semitones) */
 static void pad_retarget(void)                  /* the chord's tones to the four voices */
 {
     int from[4], to[4], i;
@@ -796,9 +817,10 @@ static void chord_change(void)                  /* to another degree: the near, 
 /* ------------------------------------------------------------- the loops --- */
 static int rand_offset(void)                    /* scale steps above the chord's degree */
 {
-    if (frand() < 0.72f) {                      /* a chord tone, sometimes an octave up */
+    if (frand() < 0.72f) {                      /* a chord tone; sometimes an octave up, sometimes down (TIDE) */
         int o = 2 * irand(chord_nt);
-        return o + (frand() < 0.3f ? nsteps : 0);
+        float r = frand();
+        return r < 0.25f ? o + nsteps : r < 0.45f ? o + OFF_DOWN : o;
     }
     return 1 + 2 * irand(3);                    /* a passing note: the 2nd, 4th or 6th */
 }
@@ -811,12 +833,17 @@ static int loop_count(int l)
     return c;
 }
 
-/* 0..5 notes: Density, moved by the weather's density, the bells' presence and the governor */
+/* 0..4 notes a loop: Density, moved by the weather's density, the bells' presence and the governor.
+ * At Garden (Density 40) a fully present loop carries about 1.1 notes, a thinning one none: the bells'
+ * presence (center 0.5) empties the loops below 0.25 and rests the layer below 0.3 (Tomorrow's Man, TESTING #11:
+ * the bells must come and go like the pad does). AMB-1 carried 0..5 and never emptied. */
 static int loop_target(void)
 {
-    float presf = fm_clampf((cd.pres[L_BELLS].x - 0.15f) * (1.0f / 0.45f), 0.0f, 1.2f);
-    float d = (float)par[P_DENSITY] * 0.05f * (1.0f + 0.8f * cd.dens) * presf * fm_db2lin(0.7f * cd.trim);
-    return (int)(fm_clampf(d, 0.0f, 5.0f) + frand());
+    float presf = fm_clampf((cd.pres[L_BELLS].x - 0.25f) * (1.0f / 0.35f), 0.0f, 1.3f);
+    float d = (float)par[P_DENSITY] * 0.028f * (1.0f + 0.8f * cd.dens) * presf * fm_db2lin(0.7f * fm_minf(cd.trim, 0.0f));
+    /* (the trim only thins: a raised trim no longer adds notes, which made the bells busiest when the garden was
+     * thinnest, 33-41 a minute in a 40 min check on 2026-11-08) */
+    return (int)(fm_clampf(d, 0.0f, 4.0f) + frand());
 }
 static uint8_t loop_rest[EN_NLOOP];             /* this pass: silent (Evolve) */
 
@@ -827,7 +854,7 @@ static void loop_add(int l)
         s = irand(len);
         if (loop_note[l][s] < 0) {
             loop_note[l][s] = (int8_t)rand_offset();
-            loop_vel[l][s] = (uint8_t)(50 + irand(50));
+            loop_vel[l][s] = (uint8_t)(30 + irand(65));           /* TIDE: 0.30..0.94 (AMB-1 0.50..0.99): soft ones too */
             return;
         }
     }
@@ -873,7 +900,7 @@ static void loop_pass(int l)                    /* the end of a pass: grow, prun
         loop_add(l);
     for (; c > t && (s = loop_pick(l)) >= 0; c--)
         loop_note[l][s] = -1;
-    loop_rest[l] = frand() < ev * 0.15f;
+    loop_rest[l] = frand() < 0.1f + ev * 0.25f;    /* TIDE: a loop sits a pass out now and then (AMB-1: ev * 0.15) */
     if (frand() < ev * 0.7f && (s = loop_pick(l)) >= 0) {
         if (frand() < 0.5f) {
             loop_note[l][s] = (int8_t)rand_offset();             /* another note */
@@ -1068,7 +1095,7 @@ static void tick(void)
     if ((sixteenth & 3u) == 0u) {               /* the loops step in quarter notes */
         for (l = 0; l < EN_NLOOP; l++) {
             int s = loop_pos[l];
-            if (loop_note[l][s] >= 0 && !loop_rest[l])
+            if (loop_note[l][s] >= 0 && !loop_rest[l] && !bells.rest)
                 bell_ring(l, s);
             en_loop_pos[l] = (uint8_t)s;
             if (++loop_pos[l] >= EN_LOOP_LEN[l]) {
@@ -1323,12 +1350,14 @@ static void tempo_set(void) { step_len = EN_SR * 60.0f / ((float)par[P_TEMPO] * 
 static void swell_set(void)                     /* Swell: how far each voice's level walkers stray */
 {
     int i, k;
-    float sd = 0.6f + 0.02f * swell;            /* dB per walker: 0.6 .. 2.6 (three summed) */
+    float sd = 0.7f + 0.023f * swell;           /* dB per walker: 0.7 .. 3.0 (three summed); Garden 2.08, AMB-1's 1.8 */
     for (i = 0; i < EN_NPAD; i++)
         for (k = 0; k < 3; k++)
             pad[i].lw[k].sd = sd;
-    for (k = 0; k < 2; k++)
-        bass.lw[k].sd = 0.5f * sd;
+    for (k = 0; k < 2; k++) {
+        bass.lw[k].sd = 0.56f * sd;             /* two summed: the bass 1.2 dB each at Garden, the bells 1.4 */
+        bells.lw[k].sd = 0.65f * sd;
+    }
 }
 
 static void apply(int p, int v)
@@ -1431,7 +1460,7 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     walker_set(&cd.space, 0.0f, 13.0f * 60.0f, 0.4f, -1.0f, 1.0f);
     walker_set(&cd.chord, 0.0f, 8.0f * 60.0f, 0.5f, -1.2f, 1.2f);
     walker_set(&cd.pres[L_PAD], 0.5f, 9.0f * 60.0f, 0.3f, 0.0f, 1.0f);
-    walker_set(&cd.pres[L_BELLS], 0.6f, 14.0f * 60.0f, 0.3f, 0.0f, 1.0f);
+    walker_set(&cd.pres[L_BELLS], 0.5f, 14.0f * 60.0f, 0.3f, 0.0f, 1.0f);   /* rests below 0.3: about a quarter of the time */
     walker_set(&cd.pres[L_BASS], 0.5f, 19.0f * 60.0f, 0.3f, 0.0f, 1.0f);
     walker_set(&cd.pres[L_GROUND], 0.3f, 29.0f * 60.0f, 0.3f, 0.0f, 1.0f);   /* enters above 0.65: about 12% of the time */
     for (k = 0; k < L_GROUND; k++)              /* a piece begins with its layers present: the rests come later */
@@ -1446,20 +1475,37 @@ static void conductor_reset(void)               /* a new piece: the weather and 
         cd.lead[k] = 0.0f;
     }
     cd.m3 = cd.m20 = cd.m60 = 0.0f;
-    cd.trim = 0.0f;
+    cd.trim = cd.ff = 0.0f;
+    cd.under = cd.silent = 0.0f;
+    for (k = 0; k < NLAYERS; k++) {
+        cd.ff_e0[k] = 0.0f;
+        cd.ff_db0[k] = 0.0f;
+    }
     cd.pad_thin = 0;
     cd.pad_target = 0;
     cd.since_entry = 100.0f;
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
-        walker_set(&v->lw[0], 0.0f, 25.0f * VOICE_K[i], 1.8f, -6.0f, 6.0f);
-        walker_set(&v->lw[1], 0.0f, 47.0f * VOICE_K[i], 1.8f, -6.0f, 6.0f);
-        walker_set(&v->lw[2], 0.0f, 90.0f * VOICE_K[i], 1.8f, -6.0f, 6.0f);
+        /* deeper swings at the same speed (Tomorrow's Man, TESTING #11): sd x1.25, tau x1.56 keeps dB/s where it was */
+        walker_set(&v->lw[0], 0.0f, 39.0f * VOICE_K[i], 2.2f, -8.0f, 8.0f);
+        walker_set(&v->lw[1], 0.0f, 73.0f * VOICE_K[i], 2.2f, -8.0f, 8.0f);
+        walker_set(&v->lw[2], 0.0f, 140.0f * VOICE_K[i], 2.2f, -8.0f, 8.0f);
         walker_set(&v->bw, 0.0f, 60.0f * VOICE_K[i], 0.08f, -0.2f, 0.2f);
         v->rest = 0.0f;
     }
-    walker_set(&bass.lw[0], 0.0f, 40.0f, 1.0f, -5.0f, 5.0f);
-    walker_set(&bass.lw[1], 0.0f, 95.0f, 1.0f, -5.0f, 5.0f);
+    walker_set(&bass.lw[0], 0.0f, 80.0f, 1.2f, -8.0f, 8.0f);      /* the bass breathes deeper and slower (TESTING #11):
+                                                                   * Phase 3 1.0 dB at 40/95 s; dB/s is kept where it was */
+    walker_set(&bass.lw[1], 0.0f, 190.0f, 1.2f, -8.0f, 8.0f);
+    bass.rest_t = bells.rest_t = 0.0f;
+    bass.gap = bells.gap = 0.0f;
+    bass.stay_t = bells.stay_t = 0.0f;
+    bass.min_stay = 300.0f + 420.0f * frand();   /* the first stay: 5-12 weather minutes before a rest may begin */
+    bells.min_stay = 240.0f + 360.0f * frand();
+    walker_set(&bells.lw[0], 0.0f, 55.0f, 1.5f, -8.0f, 8.0f);     /* the bells' level breathes too */
+    walker_set(&bells.lw[1], 0.0f, 130.0f, 1.5f, -8.0f, 8.0f);
+    bells.rest = 0;
+    bells.ldb = -60.0f;
+    bells.lin = 0.0f;
     swell_set();
     ground_gap = 120.0f;
     ground_stay = 0.0f;
@@ -1481,8 +1527,11 @@ static int pad_count(void)                      /* voices singing (not dissolvin
  * layer's share against the cap. It moves a trim (everything) and a bias per layer, slowly. */
 static const float SEND_R[NLAYERS] = {1.08f, 0.98f, 0.0064f, 0.0225f};  /* reverb send energy per dry energy */
 static const float SEND_E[NLAYERS] = {0.12f, 1.45f, 0.0f, 0.0f};        /* echo send energy per dry energy */
-static const float K_W[NLAYERS] = {1.0f, 1.6f, 0.8f, 0.5f};             /* about a loudness meter's K-weighting at each
-                                                                         * layer's register: bells +2 dB, bass -1, Ground -3 */
+static const float K_W[NLAYERS] = {1.0f, 1.6f, 0.45f, 0.3f};            /* about a loudness meter's K-weighting at each
+                                                                         * layer's register: bells +2 dB, bass -3.5 (its sub-octave
+                                                                         * at 33 Hz is -10 dB to the meter), Ground -5. Phase 3 had
+                                                                         * the bass at -1: when it led, the mix read 2-3 dB louder
+                                                                         * here than to a LUFS meter (the 2026-11-08 Garden render) */
 static void governor_step(float dt)
 {
     float dry[NLAYERS], e[NLAYERS], plate, echo, mix, sa = 0.0f, se = 0.0f, tot = 0.0f, err, cap;
@@ -1511,24 +1560,58 @@ static void governor_step(float dt)
     cd.m60 += (mix - cd.m60) * fm_minf(dt * (1.0f / 60.0f), 1.0f);
     cd.level20 = 3.0103f * fm_log2f(fm_maxf(cd.m20, 1e-9f));
     cd.level60 = 3.0103f * fm_log2f(fm_maxf(cd.m60, 1e-9f));
-    cd.target = -18.0f + 0.15f * (float)(par[P_DENSITY] - 40);   /* AMB-1's Garden sat at -16 with the pad at 78% */
+    /* -22 dB at Density 40 (Phase 3: -18, AMB-1's Garden sat at -16 with the pad at 78%). Lowered 4 dB on 2026-11-08: with
+     * the bells at 0.5 and sparse and the layers resting, the trim sat at +7 (p50) and hit its +9 rail whenever the
+     * garden thinned; now it centers near +3 with reach both ways. MASTER is the volume. */
+    cd.target = -22.0f + 0.15f * (float)(par[P_DENSITY] - 40);
     if (!en_playing || cd.speed <= 0.0f)        /* resting, or Drift at Hold: the governor's hands hold too */
         return;
-    /* loudness: inside the band (±1 dB) nothing; outside, the trim moves, at most 0.1 dB/s */
+    /* loudness: the 20 s meter against the target; inside the band (±1.5 dB) nothing; outside, the trim moves, at most
+     * 0.06 dB/s up and 0.1 down (2026-11-08: Phase 3 moved 0.1 dB/s on a ±1 dB band and chased the meter's bell
+     * strikes, ±3 dB in minutes; the 60 s one-pole was tried and lags a layer's leaving by minutes) */
     err = cd.level20 - cd.target;
-    if (err > 1.0f || err < -1.0f)
-        cd.trim = fm_clampf(cd.trim - fm_clampf(err * (1.0f / 6.0f), -1.0f, 1.0f) * 0.1f * dt, -12.0f, 9.0f);
-    /* shares: a layer over the cap (45% with three or more layers sounding, 65% with two) is drawn
-     * down (at most 10 dB, 0.1 dB/s) and the resting layers are called; 10 points under it its bias
-     * returns. The pad, when it has led for two minutes, also loses a voice. */
+    if (err > 1.5f || err < -1.5f)                /* up at most 0.06 dB/s, down 0.1: too loud is the worse fault */
+        cd.trim = fm_clampf(cd.trim - fm_clampf(err * (1.0f / 6.0f), -1.0f, 1.0f) * (err > 0.0f ? 0.1f : 0.06f) * dt, -12.0f, 9.0f);
+    /* the make-up for a resting layer (the bells, the bass): the conductor knows what it is taking away, so it
+     * gives the energy back as the layer fades (and takes it back as it returns) instead of waiting for the meter.
+     * What is missing is the layer's energy as it left (before its gain, so today's gain applies), weighted as the
+     * meter weighs it, less what of it still sounds; the make-up is the dB the meter would gain with it back,
+     * against the mix as it is now (a first version used the layer's share as it left, which stayed at 6 dB when
+     * another layer had meanwhile returned: a +13 dB minute in the 2026-11-08 Garden render). Capped at 6 dB. The
+     * trim, this and the bias sum into each layer's gain, slewed at 0.16 dB/s: that slew is the rate budget's guard
+     * (a voice's 0.4 + 0.16 + the plate's ripple sit under the swell limit). */
+    {
+        float miss = 0.0f, want;
+        if (!bells.rest && bells.ldb >= cd.ff_db0[L_BELLS] - 3.0f)
+            cd.ff_e0[L_BELLS] = 0.0f;           /* back where it was: nothing missing */
+        if (!bass.rest && bass.ldb >= cd.ff_db0[L_BASS] - 3.0f)
+            cd.ff_e0[L_BASS] = 0.0f;
+        if (cd.ff_e0[L_BELLS] > 0.0f)
+            miss += K_W[L_BELLS] * cd.ff_e0[L_BELLS] * cd.g[L_BELLS] * cd.g[L_BELLS]
+                    * (1.0f - fm_db2lin(2.0f * fm_minf(bells.ldb - cd.ff_db0[L_BELLS], 0.0f)));
+        if (cd.ff_e0[L_BASS] > 0.0f)
+            miss += K_W[L_BASS] * cd.ff_e0[L_BASS] * cd.g[L_BASS] * cd.g[L_BASS]
+                    * (1.0f - fm_db2lin(2.0f * fm_minf(bass.ldb - cd.ff_db0[L_BASS], 0.0f)));
+        want = miss > 0.0f ? fm_minf(3.0103f * fm_log2f((cd.m20 + miss) / fm_maxf(cd.m20, 1e-9f)), 6.0f) : 0.0f;
+        cd.ff = slew(cd.ff, want, 0.15f, 0.15f, dt);   /* the gains' slew (0.16 dB/s) is the budget's guard */
+    }
+    /* shares: a layer over the cap (45% with three or more layers sounding; none with two) is drawn
+     * down (at most 8 dB, 0.06 dB/s); 10 points under it its bias returns. The pad, when it has led for
+     * two minutes, also loses a voice. */
     {
         int active = 0;
         for (k = 0; k < NLAYERS; k++)
             active += cd.e20[k] > 1e-5f;        /* sounding (above -50 dB): a resting layer is not counted */
-        cap = active >= 3 ? 0.45f : 2.0f;       /* two layers: no bias (one of them must lead); the call below */
+        cap = active >= 3 ? 0.45f : 2.0f;       /* two layers: no bias (one of them must lead) */
+    }
+    {
+        float wtot = 0.0f;
+        for (k = 0; k < NLAYERS; k++)
+            wtot += K_W[k] * cd.e20[k];
+        for (k = 0; k < NLAYERS; k++)
+            cd.wshare[k] = wtot > 0.0f ? K_W[k] * cd.e20[k] / wtot : 0.0f;
     }
     for (k = 0; k < NLAYERS; k++) {
-        int j;
         float want;
         cd.share[k] = tot > 0.0f ? cd.e20[k] / tot : 0.0f;
         cd.lead[k] = cd.share[k] > 0.5f ? cd.lead[k] + dt : fm_maxf(cd.lead[k] - dt, 0.0f);
@@ -1537,21 +1620,46 @@ static void governor_step(float dt)
         if (err < -1.0f && want < cd.bias[k])
             want = cd.bias[k];                  /* the mix is under its target: no layer is drawn down further */
         cd.bias[k] = slew(cd.bias[k], want, 0.06f, 0.06f, dt);
-        if (cd.lead[k] > 180.0f)                /* it has led for three minutes: the others are called back */
-            for (j = 0; j < NLAYERS; j++)
-                if (j != k && j != L_GROUND && cd.pres[j].x < cd.pres[j].center + 0.2f)
-                    cd.pres[j].x = fm_minf(cd.pres[j].x + 0.02f * dt * cd.speed, 1.0f);
-        cd.gdb[k] = slew(cd.gdb[k], cd.trim + cd.bias[k], 0.16f, 0.16f, dt);
+        cd.gdb[k] = slew(cd.gdb[k], cd.trim + cd.ff + cd.bias[k], 0.16f, 0.16f, dt);
         cd.g[k] = fm_db2lin(cd.gdb[k]);
     }
     if (cd.share[L_PAD] > cap + 0.05f && cd.lead[L_PAD] > 120.0f)
         cd.pad_thin = 1;                        /* (never with fewer than three layers sounding: cap is 2) */
     else if (cd.share[L_PAD] < cap - 0.05f)
         cd.pad_thin = 0;
-    if (err < -2.0f)                            /* the whole garden has thinned: the resting layers are called */
+    /* the ensemble floor (2026-11-08): the layers' rests are independent, so now and then they coincide, and with the
+     * trim's reach spent (+9 dB) the pad alone cannot reach the target: the first 4 h Garden render fell to -53 LUFS,
+     * Voices to silence. Rule: when the mix has sat 6 dB or more under its target for a minute, or no layer has
+     * sounded for ten seconds, one resting layer is called back (the bass first, then the bells), its presence set
+     * just over its return threshold so it does not rest again at once; then three minutes' grace. The pad's own
+     * floor is in pad_step (a voice at least while the bells and the bass both rest). A discrete call, so the
+     * walkers' means are not biased (Phase 3's continuous calls were: see the note at the end of this function). */
+    {
+        int active = 0;
         for (k = 0; k < L_GROUND; k++)
-            if (cd.pres[k].x < cd.pres[k].center)
-                cd.pres[k].x = fm_minf(cd.pres[k].x + 0.03f * dt * cd.speed, 1.0f);
+            active += cd.e20[k] > 1e-3f;        /* sounding above -30 dB */
+        cd.silent = active ? 0.0f : cd.silent + dt;
+        cd.under = err < -6.0f ? cd.under + dt : fm_maxf(cd.under - dt, -1000.0f);
+        if ((cd.under > 60.0f || cd.silent > 10.0f) && cd.under > -1.0f) {
+            if (bass.rest && bass_vol > 0.0f) {
+                bass.rest = 0;
+                cd.pres[L_BASS].x = fm_maxf(cd.pres[L_BASS].x, 0.45f);
+                midi(0x92, bass.midi_note, 80);
+            } else if (bells.rest && bell_vol > 0.0f) {
+                bells.rest = 0;
+                cd.pres[L_BELLS].x = fm_maxf(cd.pres[L_BELLS].x, 0.47f);
+            } else {
+                cd.pres[L_PAD].x = fm_maxf(cd.pres[L_PAD].x, 0.65f);   /* the pad: two voices' worth of presence */
+            }
+            cd.under = -180.0f;
+            cd.silent = 0.0f;
+        }
+    }
+    /* Phase 3 also called the resting layers' presence up when a layer had led for three minutes or the mix was
+     * 2 dB under its target (0.02 and 0.03 per second). Removed 2026-11-08: a presence walker's own pull is about
+     * 0.0004 per second, so any such call overrode the rests (the bells' presence averaged 0.65 around a center of
+     * 0.5 and the bells rested twice in four hours). The rests are the design; the trim and the pad's headroom
+     * term are the governor's hands when the garden thins. */
 }
 
 static void pad_step(float dt)
@@ -1564,6 +1672,9 @@ static void pad_step(float dt)
                      + 0.05f * fm_clampf(cd.target - cd.level20, -4.0f, 4.0f), 0.0f, 1.0f);   /* the governor's headroom */
     want_n = want < 0.3f ? 0 : want < 0.6f ? 1 : want < 0.85f ? 2 : 3;   /* about 25% / 38% / 25% / 12% */
     want_n -= cd.pad_thin;
+    if (want_n < 1 && (bells.rest || bells.ldb < -20.0f || bell_vol <= 0.0f) && (bass.rest || bass.ldb < -20.0f || bass_vol <= 0.0f))
+        want_n = 1;                             /* the ensemble floor: a voice at least while the others are out or
+                                                 * still far away (a return from -60 dB at 0.25 dB/s is inaudible for minutes) */
     if (want_n < 0)
         want_n = 0;
     if (!en_playing || cd.speed <= 0.0f)
@@ -1638,18 +1749,77 @@ static void bass_step(float dt)
     float tgt;
     walk(&bass.lw[0], cd.speed);
     walk(&bass.lw[1], cd.speed);
-    if (en_playing && cd.speed > 0.0f) {       /* the bass sits out when its presence is low */
-        if (!bass.rest && cd.pres[L_BASS].x < 0.3f) {
-            bass.rest = 1;
-            midi(0x82, bass.midi_note, 0);
-        } else if (bass.rest && cd.pres[L_BASS].x > 0.4f) {
-            bass.rest = 0;
-            midi(0x92, bass.midi_note, 80);
+    /* the bass sits out when its presence is low, once it has stayed its least (5-12 weather minutes); a rest lasts
+     * 2-5 weather minutes after the layer has gone (under -40 dB), then it returns whatever its presence says, the
+     * presence lifted a little over the threshold so it does not leave again at once. Bounded on both sides
+     * (2026-11-08): a presence walker alone can sit under 0.3 for an hour at Garden's half speed */
+    if (en_playing && cd.speed > 0.0f) {
+        if (!bass.rest) {
+            bass.stay_t += dt * cd.wspeed;
+            if (cd.pres[L_BASS].x < 0.3f && bass.stay_t >= bass.min_stay) {
+                bass.rest = 1;
+                bass.rest_t = 0.0f;
+                bass.gap = 120.0f + 180.0f * frand();
+                cd.ff_e0[L_BASS] = cd.e20[L_BASS] / fm_maxf(cd.g[L_BASS] * cd.g[L_BASS], 1e-6f);
+                cd.ff_db0[L_BASS] = bass.ldb;
+                midi(0x82, bass.midi_note, 0);
+            }
+        } else {
+            if (bass.ldb <= -40.0f)
+                bass.rest_t += dt * cd.wspeed;
+            if (bass.rest_t >= bass.gap) {
+                bass.rest = 0;
+                bass.stay_t = 0.0f;
+                bass.min_stay = 300.0f + 420.0f * frand();
+                cd.pres[L_BASS].x = fm_maxf(cd.pres[L_BASS].x, 0.4f);
+                midi(0x92, bass.midi_note, 80);
+            }
         }
     }
-    tgt = en_playing && !bass.rest ? bass.lw[0].x + bass.lw[1].x : -60.0f;
-    bass.ldb = slew(bass.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.4f, en_playing ? 0.25f : 6.0f, dt);
+    /* its level: the two walkers, and 4 dB less as its presence falls from 0.6 toward the rest (a layer on
+     * its way out is already quieter) */
+    tgt = en_playing && !bass.rest ? bass.lw[0].x + bass.lw[1].x + 4.0f * fm_clampf((cd.pres[L_BASS].x - 0.6f) * (1.0f / 0.3f), -1.0f, 0.0f)
+                                   : -60.0f;
+    bass.ldb = slew(bass.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.25f, en_playing ? 0.25f : 6.0f, dt);   /* a return is as slow as a leave */
     bass.lin = bass.ldb <= -59.0f ? 0.0f : fm_db2lin(bass.ldb);
+}
+
+/* the bells as a layer (Tomorrow's Man, TESTING #11: they were constant, loud and busy): their presence empties the
+ * loops as it falls (loop_target) and below 0.3 rests the layer (no bell rings; the ringing ones decay),
+ * back above 0.42; the layer's level breathes on two summed walkers, is 6 dB less as its presence falls
+ * from 0.6 toward the rest, and comes back from -60 dB at 0.4 dB/s: a return takes two or three minutes */
+static void bells_step(float dt)
+{
+    float tgt;
+    walk(&bells.lw[0], cd.speed);
+    walk(&bells.lw[1], cd.speed);
+    /* the rest, as the bass's: after a stay of 4-10 weather minutes at the least, when the presence is under 0.3;
+     * 2.5-6 weather minutes once the layer has gone; back whatever the presence says, lifted to 0.42 */
+    if (en_playing && cd.speed > 0.0f) {
+        if (!bells.rest) {
+            bells.stay_t += dt * cd.wspeed;
+            if (cd.pres[L_BELLS].x < 0.3f && bells.stay_t >= bells.min_stay) {
+                bells.rest = 1;
+                bells.rest_t = 0.0f;
+                bells.gap = 150.0f + 210.0f * frand();
+                cd.ff_e0[L_BELLS] = cd.e20[L_BELLS] / fm_maxf(cd.g[L_BELLS] * cd.g[L_BELLS], 1e-6f);
+                cd.ff_db0[L_BELLS] = bells.ldb;
+            }
+        } else {
+            if (bells.ldb <= -40.0f)
+                bells.rest_t += dt * cd.wspeed;
+            if (bells.rest_t >= bells.gap) {
+                bells.rest = 0;
+                bells.stay_t = 0.0f;
+                bells.min_stay = 240.0f + 360.0f * frand();
+                cd.pres[L_BELLS].x = fm_maxf(cd.pres[L_BELLS].x, 0.42f);
+            }
+        }
+    }
+    tgt = en_playing && !bells.rest ? bells.lw[0].x + bells.lw[1].x + 6.0f * fm_clampf((cd.pres[L_BELLS].x - 0.6f) * (1.0f / 0.3f), -1.0f, 0.0f)
+                                    : -60.0f;
+    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.25f, en_playing ? 0.25f : 6.0f, dt);   /* a return is as slow as a leave */
+    bells.lin = bells.ldb <= -59.0f ? 0.0f : fm_db2lin(bells.ldb);
 }
 
 static void ground_step(float dt)               /* Ground: rare, slow, low (TESTING #9) */
@@ -1711,6 +1881,7 @@ static void conductor_step(void)                /* every CTRL_N samples */
     echo_fb_eff = fm_clampf(echo_fb + 0.08f * cd.space.x - 0.05f * fm_clampf(-cd.trim * (1.0f / 6.0f), 0.0f, 1.0f), 0.3f, 0.9f);
     governor_step(dt);
     pad_step(dt);
+    bells_step(dt);
     bass_step(dt);
     ground_step(dt);
     /* the chord dwells in weather seconds: Hold stops it, a fast season shortens it */
@@ -1749,6 +1920,9 @@ static void conductor_step(void)                /* every CTRL_N samples */
     en_cond[CD_PAD_VOICES] = (float)pad_count();
     en_cond[CD_GROUND] = ground_db;
     en_cond[CD_OPENING] = cd.opening > 0.0f ? 1.0f : 0.0f;
+    en_cond[CD_BELLS] = bells.ldb;
+    en_cond[CD_BASS] = bass.ldb;
+    en_cond[CD_FF] = cd.ff;
 }
 
 static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */
@@ -2210,7 +2384,8 @@ static void render_ground(uint32_t n)
 static void render_bells(uint32_t n)
 {
     int i;
-    const float g = bell_vol * 0.8f * cd.g[L_BELLS], arate = 0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f);   /* AMB-1: 0.62 */
+    /* the layer's gain: 0.5 (AMB-1 0.62, Phase 3 0.8: too loud, Tomorrow's Man), the governor's, and the layer's breathing level */
+    const float g = bell_vol * 0.5f * cd.g[L_BELLS] * bells.lin, arate = 0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f);
     for (i = 0; i < NBELL; i++) {
         bell_t *v = &bell[i];
         float cph = v->cph, mph = v->mph, amp = v->amp, idx = v->idx, att = v->att;

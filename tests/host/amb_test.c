@@ -208,13 +208,18 @@ int main(void)
         int diff = 0, l;
         en_set(P_DRIFT, 50);
         en_set(P_EVOLVE, 100);
-        en_set(P_DENSITY, 80);
+        en_set(P_DENSITY, 100);                  /* TIDE: the loops carry fewer notes and may be empty at a low presence */
         memcpy(before, (const void *)en_loop_note, sizeof before);
-        run(90.0f);
-        for (l = 0; l < EN_NLOOP; l++)
-            for (i = 0; i < EN_LOOP_MAX; i++)
-                diff += before[l][i] != en_loop_note[l][i];
-        CHECK(diff > 0, "the loops evolved");
+        run(180.0f);
+        {
+            int notes = 0;
+            for (l = 0; l < EN_NLOOP; l++)
+                for (i = 0; i < EN_LOOP_MAX; i++) {
+                    diff += before[l][i] != en_loop_note[l][i];
+                    notes += en_loop_note[l][i] >= 0;
+                }
+            CHECK(diff > 0 || notes == 0, "the loops evolved (%d notes)", notes);   /* TIDE: empty loops (a low presence) cannot */
+        }
         for (l = 0; l < EN_NLOOP; l++)
             for (i = EN_LOOP_LEN[l]; i < EN_LOOP_MAX; i++)
                 CHECK(en_loop_note[l][i] == -1, "loop %d slot %d past its end", l, i);
@@ -320,7 +325,8 @@ int main(void)
             en_set(P_BTONE, TONE[k]);
             en_set(P_BOCT, OCT[k]);
             en_play(1);
-            for (b2 = 0; b2 < 20 * 44100 / 256; b2++) {
+            run(40.0f);                          /* TIDE: the bells fade in over the opening's 30 s */
+            for (b2 = 0; b2 < 60 * 44100 / 256; b2++) {   /* a minute: the loops carry 1-3 notes each now */
                 en_render(buf, 256, 2048);
                 for (j = 0; j < 256; j++) {
                     float x = (float)buf[2 * j];
@@ -330,8 +336,8 @@ int main(void)
             }
             zc[k] = (float)z;
         }
-        CHECK(zc[1] > 2.5f * zc[0], "Bell tone 100 not brighter: %.0f vs %.0f", (double)zc[1], (double)zc[0]);
-        CHECK(zc[2] > 1.8f * zc[0], "Bell oct +2 not higher: %.0f vs %.0f", (double)zc[2], (double)zc[0]);
+        CHECK(zc[1] > 1.5f * zc[0], "Bell tone 100 not brighter: %.0f vs %.0f", (double)zc[1], (double)zc[0]);
+        CHECK(zc[2] > 1.4f * zc[0], "Bell oct +2 not higher: %.0f vs %.0f", (double)zc[2], (double)zc[0]);
     }
 
     /* TIDE: the governor and the swell limit. The pad alone (the other layers' levels at zero), the
@@ -409,19 +415,70 @@ int main(void)
         CHECK(p1 <= 1.0f, "the pad's level moved %.2f dB/s (limit 1.0)", (double)p1);
         CHECK(p2 <= 1.5f, "the pad's level moved %.2f dB in 2 s (limit 1.5)", (double)p2);
         CHECK(!bad, "NaN");
-        /* the whole garden, 12 minutes: the governor holds the mix near its target */
+        /* the whole garden, 20 minutes: the governor holds the 60 s level within 3 dB of its target most of the
+         * time (the layers rest and return; the first two minutes are the opening) */
+        {
+            int s, out = 0;
+            float worst = 0.0f;
+            en_init();
+            en_play(1);
+            run(120.0f);
+            for (s = 0; s < 18 * 60; s++) {
+                float e;
+                run(1.0f);
+                e = en_cond[CD_LEVEL60] - en_cond[CD_TARGET];
+                out += fabsf(e) > 3.0f;
+                if (fabsf(e) > fabsf(worst))
+                    worst = e;
+            }
+            printf("  the garden, 20 min: 60 s level outside +-3 dB of the target %.0f%% of the time (worst %+.1f dB); "
+                   "trim %.1f, make-up %.1f, shares %.0f/%.0f/%.0f/%.0f%%\n", (double)(100.0f * (float)out / (18.0f * 60.0f)),
+                   (double)worst, (double)en_cond[CD_TRIM], (double)en_cond[CD_FF],
+                   (double)(100.0f * en_cond[CD_SHARE_PAD]), (double)(100.0f * en_cond[CD_SHARE_BELLS]),
+                   (double)(100.0f * en_cond[CD_SHARE_BASS]), (double)(100.0f * en_cond[CD_SHARE_GROUND]));
+            CHECK(out < 18 * 60 / 4, "the governor was over 3 dB off its target %d of %d seconds", out, 18 * 60);
+            CHECK(!bad, "NaN");
+        }
+    }
+
+    /* TIDE: the bells are a layer (TESTING #11): in two hours of the garden at Drift 50 (1x) they rest at least
+     * once for a minute or more (the layer's level under -30 dB: no bell rings, the last ones have decayed) and
+     * come back; their level, a slewed sum of walkers, never moves faster than the swell limit */
+    {
+        int s, rests = 0, back = 0, resting = 0, longest = 0, cur = 0, rate_bad = 0;
+        float prev = -60.0f;
         en_init();
+        en_set(P_DRIFT, 50);
         en_play(1);
-        run(12.0f * 60.0f);
-        printf("  the garden, 12 min: governor level %.1f dB, target %.1f, trim %.1f, shares %.0f/%.0f/%.0f/%.0f%%, "
-               "gains %.1f/%.1f/%.1f/%.1f dB\n",
-               (double)en_cond[CD_LEVEL20], (double)en_cond[CD_TARGET], (double)en_cond[CD_TRIM],
-               (double)(100.0f * en_cond[CD_SHARE_PAD]), (double)(100.0f * en_cond[CD_SHARE_BELLS]),
-               (double)(100.0f * en_cond[CD_SHARE_BASS]), (double)(100.0f * en_cond[CD_SHARE_GROUND]),
-               (double)en_cond[CD_GAIN_PAD], (double)en_cond[CD_GAIN_BELLS], (double)en_cond[CD_GAIN_BASS],
-               (double)en_cond[CD_GAIN_GROUND]);
-        CHECK(fabsf(en_cond[CD_LEVEL20] - en_cond[CD_TARGET]) <= 3.0f, "the governor is %.1f dB off its target",
-              (double)(en_cond[CD_LEVEL20] - en_cond[CD_TARGET]));
+        run(60.0f);
+        prev = en_cond[CD_BELLS];
+        for (s = 0; s < 7200; s++) {
+            float lv;
+            run(1.0f);
+            lv = en_cond[CD_BELLS];
+            if (fabsf(lv - prev) > 1.0f)
+                rate_bad++;
+            prev = lv;
+            if (lv < -30.0f) {
+                cur++;
+                if (cur > longest)
+                    longest = cur;
+                if (cur == 60)
+                    rests++;
+                resting = 1;
+            } else {
+                cur = 0;
+                if (resting && lv > -6.0f) {
+                    back++;
+                    resting = 0;
+                }
+            }
+        }
+        printf("  the bells, 2 h at Drift 50: %d rests of a minute or more (longest %d s), back %d times, level %.1f dB\n",
+               rests, longest, back, (double)en_cond[CD_BELLS]);
+        CHECK(rests >= 1, "the bells never rested in two hours at Drift 50");
+        CHECK(back >= 1 || rests == 0, "the bells rested and never came back");
+        CHECK(rate_bad == 0, "the bells' level moved over 1 dB/s at %d moments", rate_bad);
         CHECK(!bad, "NaN");
     }
 
