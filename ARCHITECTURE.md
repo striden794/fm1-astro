@@ -686,3 +686,66 @@ After Tomorrow's Man's fourth listening (TESTING #21, #23). Where the numbers of
   minutes failed once the count rode a walker: 13 bells against 77); the pad-alone swell test runs through the steady
   plate. All pass.
 - **CPU**: one oscillator more in the plate; a walker; nothing else of note. Still unmeasured on the device.
+
+## 15. TIDE Phase 5c: standing tones and the ebb (2026-11-10)
+
+After Tomorrow's Man's fifth listening (TESTING #25, on the Phase 5b Garden take). Where the numbers of §11–§14 differ, these
+win. All in `app/dsp/amb.c` unless said.
+
+**What he heard, measured.** "Tones at ~530 Hz and its harmonic at ~1060 Hz that overwhelm when they become static",
+"almost a standing wave" at 0:48:30–0:49:00, "the very specific tone that can sound like feedback" at 3:39–3:40; and
+"the excerpt on the whole stays the same loudness ... this never relents". Both tones are one pad voice:
+- 0:48: voice 3 on C5 (522.5 Hz) at amplitude 1.72 (+4.7 dB; its usual 0.1–0.5), its three level walkers cresting
+  together at +8.6 dB over its resting level, the FM bloom at the crest putting its octave (C6, 1045 Hz) 4 dB over
+  its fundamental, the other voices and the bass fading, the gains lifted 2.5 dB for the thin garden, the plate at
+  1.4 times the dry pad.
+- 3:39: two voices on the same C#5 (MIDI 73; `pad_step`'s "not the same pitch class" was a preference, not a rule),
+  1.29 and 0.47, the plate ringing at 3.5 times the dry pad, the 60 s loudness 5.5 dB over the target (the take's
+  loudest moment).
+A fixed EQ would not have answered it: the tone is whatever note the voice holds (C5 once, C#5 the other time, a
+dozen quieter cases between C#4 and D5). And a plate at this decay answers a held sine with whichever of its modes
+lie on it, ±6 dB from note to note, so the remedy is that no single held voice gets that large.
+
+- **A voice's ceiling** (`PAD_CREST` 3 dB, `PAD_TOP` −3 dB; `pad_step`). The walkers' sum is compressed 4:1 above
+  +1.5 dB and stops at +3 over the voice's resting level; and no voice's level passes −3 dB whatever its resting
+  level (amplitude 0.71; a lone voice there weighs about the Density target by itself, at 0 dB 4–5 dB more).
+  Downward the walkers are as deep as before.
+- **A voice's height** (`pad_height`, `PAD_TILT` 0.35 dB a semitone above G4, `PAD_ROUND` 0.35). A voice is softer
+  the higher its note (C5 −1.75 dB, F5 −3.5, B5 −5.6: about the ear's curve from 400 Hz to 1 kHz), and above E4 its
+  overtones halve an octave (the FM index with its bloom, and the second harmonic; `v->hk`, at least 0.35). `v->crest`
+  is taken without the tilt.
+- **No unison** (`pad_step`, `same`). A voice does not enter on the very note another voice sings or is still
+  dissolving on above −30 dB; it waits, or another voice goes. The pitch-class preference stays a preference.
+- **The pad's gain 0.40** (`render_pad`; 0.36): the ceiling and the tilt took 3.5 dB off the pad's median level in a
+  first take (its share 45% → 33%); 0.9 dB given back.
+- **The ebb** (`EBB_*`, `governor_step`, `cd.ebb`). Every `EBB_GAP` (5–16 Drift minutes: 10–32 real minutes at
+  Garden's half speed), if the 20 s meter is within 5 dB of the target, an ebb begins: its bottom is drawn
+  (`EBB_DEPTH`, 11–16 dB under the Density target) and its stay (`EBB_HOLD`, 45–165 real seconds); the bells'
+  activity is set to a lull (−1.0..−1.4). `cd.ebb` (dB, on every layer's gain, outside the gains' own 0.16 dB/s
+  slew) then follows a servo: the garden's own level (the 3 s meter less the ebb as that meter hears it, `cd.ebb3`)
+  is taken down to the bottom, `want = clamp(target − depth − own level, −EBB_MOST, 0)`, falling at `EBB_FALL`
+  0.1 dB/s and rising at `EBB_RISE` 0.25. The bottom is a place, not a drop: if the garden thins by itself under
+  an ebb (a lone voice's walkers can take 10 dB off in a minute) the ebb gives the difference back. (As a drop of
+  9–16 dB with a floor on the 20 s meter, three takes read 19.1, 19.3 and 20.9 dB under the target at the deepest;
+  the Definition of done's line is 20.) The stay counts down while the ebb is within 1 dB of where it is wanted;
+  then the ebb returns to 0 and the next gap is drawn. The governor compares its meter with the target less the ebb
+  as a 20 s meter hears it (`cd.ebb20`), so the trim neither chases an ebb down nor lifts into it; the pad's voice
+  count, a new voice's size, the bells' company and the "nothing sounds" threshold use the same. At Hold nothing of
+  it moves. What stays: the foundation (a pad voice or the bass always sounds), so an ebb is far-off music, not
+  silence. `en_cond[CD_EBB]`, CSV `c_ebb`.
+- **A lift is handed back** (`governor_step`, `back`). A raised trim comes down at 0.15 dB/s (not the relaxing
+  0.02) once the mix is within 3 dB of its target again on the 20 s or the 3 s meter. In a take without it the trim
+  (+6) and the make-up (+3) sat through a 14 dB lull, the bass and a voice returned together under them, and the
+  60 s loudness went 5.8 dB over before the cut began.
+- **The report** (`../tools/evolve_report.py`). *Standing tones*, for information: per 10 s the strongest single
+  partial of the mono mix between 250 Hz and 6 kHz, A-weighted, as the loudness of that sine alone against the
+  Density target; the minutes with one tone within 3 dB of the target's whole loudness, the loudest, the eight
+  loudest moments with note and share (`features.npz` is now `-v2` and holds `tone`). On the 5b take it ranks
+  Tomorrow's Man's two moments first and third of 2,880 (0:48:40 C6 +0.4 dB, 3:39:20 C#5 −0.7). *The tide*, for information:
+  the ebbs from `c_ebb` (deeper than 3 dB; returns shorter than three minutes joined), their depth, length, spacing
+  and the 60 s loudness at each bottom, with a figure. *The crest line is judged above the fitted parabola* (Tomorrow's Man
+  ok, TESTING #27); the straight line's figure is printed for information. `../tools/compare.py`: rows to match.
+- **Tests** (`tests/host/amb_test.c`): an hour at Drift 100: no two voices above −30 dB on one note; no voice over
+  its ceiling (−3 dB less the tilt); three or more ebbs of 5 dB or more, none over 17, each back; at Hold an ebb
+  does not move. All pass.
+- **CPU**: nothing per sample; a handful of operations per conductor step. Still unmeasured on the device.

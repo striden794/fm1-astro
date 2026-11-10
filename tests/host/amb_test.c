@@ -674,6 +674,54 @@ int main(void)
         CHECK(en_field_root == 9 && en_field_pool == EN_MODE_POOL[MODE_PENT_MAJ], "a new scale: the field is %s", en_field_name(nm));
     }
 
+    /* TIDE Phase 5c (Tomorrow's Man, TESTING #25: standing tones; no breathers). In an hour of the garden at Drift 100: no two
+     * pad voices sing the same note at once (both above -30 dB); no voice rises past its ceiling (-3 dB, less 0.35 dB
+     * a semitone above G4); the tide goes out at least three times, 5 dB or more, never more than 17, and comes back
+     * each time; and at Hold an ebb stays where it is */
+    {
+        int s, k, j, unison = 0, ebbs = 0, out = 0, back = 0;
+        float amp_max = 0.0f, over = 0.0f, deepest = 0.0f, held, e0;
+        en_init();
+        en_set(P_DRIFT, 100);
+        en_play(1);
+        for (s = 0; s < 3600; s++) {
+            run(1.0f);
+            for (k = 0; k < EN_NPAD; k++) {
+                const float cap = powf(10.0f, (-3.0f - 0.35f * fmaxf((float)en_pad_note[k] - 67.0f, 0.0f)) / 20.0f);
+                if (en_pad_amp[k] > amp_max)
+                    amp_max = en_pad_amp[k];
+                if (en_pad_amp[k] / cap > over)
+                    over = en_pad_amp[k] / cap;
+                for (j = 0; j < k; j++)
+                    unison += en_pad_amp[k] > 0.0316f && en_pad_amp[j] > 0.0316f && en_pad_note[k] == en_pad_note[j];
+            }
+            if (en_cond[CD_EBB] < deepest)
+                deepest = en_cond[CD_EBB];
+            if (!out && en_cond[CD_EBB] < -5.0f) {
+                out = 1;
+                ebbs++;
+            } else if (out && en_cond[CD_EBB] > -0.5f) {
+                out = 0;
+                back++;
+            }
+        }
+        printf("  the pad, 1 h at Drift 100: loudest voice %.2f (%.2f of its ceiling), %d s of unison; %d ebbs, %d back, the deepest %.1f dB\n",
+               (double)amp_max, (double)over, unison, ebbs, back, (double)deepest);
+        CHECK(unison == 0, "two voices on one note for %d s", unison);
+        CHECK(over <= 1.02f, "a voice at %.2f of its ceiling", (double)over);
+        CHECK(ebbs >= 3 && back >= ebbs - 1, "%d ebbs, %d back", ebbs, back);
+        CHECK(deepest >= -17.01f, "an ebb of %.1f dB", (double)deepest);
+        for (s = 0; s < 1200 && en_cond[CD_EBB] > -4.0f; s++)   /* into the next ebb, then Hold */
+            run(1.0f);
+        en_set(P_DRIFT, 0);
+        run(2.0f);
+        e0 = en_cond[CD_EBB];
+        run(60.0f);
+        held = en_cond[CD_EBB];
+        CHECK(e0 < -3.0f && fabsf(held - e0) < 0.01f, "Hold: the ebb moved from %.2f to %.2f dB", (double)e0, (double)held);
+        CHECK(!bad, "NaN");
+    }
+
     /* stop: the tails die away */
     for (i = 0; i < P_NPARAMS; i++)
         en_set(i, en_param_info(i)->def);

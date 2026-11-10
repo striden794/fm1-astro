@@ -10,7 +10,9 @@
  * pulse's place. The sounds (voices, bells, bass, echo, plate) are AMB-1's.
  * Phase 4: the timbre landscape and its cursor. Phase 5: the harmonic field (a scale on a root that moves over
  * hours, one pitch class at a time), the bells sparse and soft, the governor one-sided. Phase 5b: the bells in the
- * scale at every register and in passages that let up, the plate's modulation wandering (ARCHITECTURE.md 11-14). */
+ * scale at every register and in passages that let up, the plate's modulation wandering (ARCHITECTURE.md 11-14).
+ * Phase 5c: a pad voice's crest has a ceiling, its high notes are softer and rounder, no two voices sing one note;
+ * the ebb, the whole garden sinking for a few minutes and coming back (ARCHITECTURE.md 15). */
 #include "amb.h"
 #include "fastmath.h"
 #ifdef EN_HOST
@@ -335,7 +337,7 @@ const char *const EN_COND_NAME[EN_NCOND] = {
     "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
     "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
     "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff", "cursor_x", "cursor_y", "anchor",
-    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs"};
+    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs", "ebb"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told. TIDE Phase 5: the field's scale, relative to the field's root */
@@ -469,6 +471,7 @@ typedef struct {
     float rise, fall;                           /* dB/s: in and while singing, dissolving */
     float stay, rest;                           /* seconds left singing; seconds before it may enter again */
     float crest;                                /* 0..1: how far above its base it is (brightness follows) */
+    float tilt, hk;                             /* Phase 5c: its note's height: dB off its level, and its overtones' share (pad_height) */
     float vowel, idx;                           /* the vowel's place (0..1) and the Rhodes index, rate-limited */
     walker_t lw[3], bw;                         /* level walkers; a brightness offset */
     float ic[4];                                /* the two filters' states */
@@ -485,6 +488,31 @@ static pad_t pad[EN_NPAD];
 static float pad_gate, pad_gain, pad_vol, bright, swell;
 static const float PAD_PAN[EN_NPAD] = {-0.55f, -0.18f, 0.18f, 0.55f};
 static const float VOICE_K[EN_NPAD] = {1.0f, 1.13f, 0.89f, 1.21f};   /* each voice's walkers a little apart */
+/* Phase 5c (Tomorrow's Man, TESTING #25: tones at ~530 and ~1060 Hz that "overwhelm when they become static", "almost a standing
+ * wave" at 0:48:30, "the very specific tone that can sound like feedback" at 3:39). Each was one pad voice: C5 at
+ * 0:48 with its octave louder than itself, C#5 at 3:39 sung by two voices at once, the voice 5-9 dB over its
+ * resting level on three walkers that happened to crest together, the rest of the garden nearly out and the plate
+ * ringing on the held note. Four numbers:
+ * PAD_CREST: a voice's walkers lift it this far over its resting level and no further (the knee is at half of it;
+ *   their sum reached +8.6 dB at 0:48). Downward they are as deep as before: quiet is the music.
+ * PAD_TILT: dB a semitone a voice is softer above PAD_TILT_FROM (G4): about the ear's own curve between 400 Hz and
+ *   1 kHz, which neither the governor's meter nor a loudness meter knows of when the rest is a bass at 73 Hz.
+ * PAD_ROUND: above E4 a voice's overtones (the FM index, its bloom at a crest, the second harmonic) halve an octave,
+ *   to this at the least; at a crest the Rhodes's octave was louder than its fundamental (C6, 1045 Hz, at 0:48:40).
+ * And no unison: a voice does not enter on a note another is singing (pad_step). */
+#define PAD_CREST 3.0f
+#define PAD_TOP (-3.0f)                         /* and no voice sings over this, dB, whatever its resting level: a voice alone
+                                                 * at 0 dB weighs 4-5 dB more than the whole garden is meant to (a take with
+                                                 * PAD_CREST alone: one voice at +0.7 dB in a garden lifted 6 dB for its thinness,
+                                                 * the 60 s loudness 4.4 dB over at 6:13); at -3 it is about the target by itself */
+#define PAD_TILT 0.35f
+#define PAD_TILT_FROM 67.0f
+#define PAD_ROUND 0.35f
+static void pad_height(pad_t *v)                /* a voice's note is set: what its height takes off it */
+{
+    v->tilt = -PAD_TILT * fm_maxf(v->note - PAD_TILT_FROM, 0.0f);
+    v->hk = fm_clampf(fm_exp2f((64.0f - v->note) * (1.0f / 12.0f)), PAD_ROUND, 1.0f);
+}
 static const float VOWEL[4][2] = {{320.0f, 800.0f}, {480.0f, 900.0f}, {730.0f, 1090.0f}, {530.0f, 1840.0f}};
 
 static void svf_coefs(float *c, float f, float k)
@@ -613,6 +641,11 @@ static struct {
     float share[NLAYERS], lead[NLAYERS];        /* each layer's share of the energy; seconds over the cap */
     uint8_t pad_thin;                           /* the pad has led too long: one voice fewer */
     float floor_hold;                           /* seconds the ensemble floor's voice is still asked for (a latch) */
+    /* the ebb (Phase 5c) */
+    float ebb, ebb20, ebb3;                     /* dB on every layer's gain (0: the tide is in); the same as the 20 s and 3 s meters hear it */
+    float ebb_depth, ebb_hold;                  /* this ebb's bottom, dB under the target; real seconds left there */
+    float ebb_t, ebb_next;                      /* Drift seconds since the last one; when the next is due */
+    uint8_t ebbing;
     /* the pad */
     int pad_target;
     float since_entry, entry_gap;               /* seconds since a voice entered; the least before the next may */
@@ -634,6 +667,7 @@ static void pad_note_on(pad_t *v, int i)
     if (en_playing && v->midi_note)
         midi(0x80, v->midi_note, 0);
     v->note = v->target;
+    pad_height(v);
     {   /* the discrete set: the nearest anchor's colour and ratio, as the note starts (DESIGN section 4) */
         const anchor_t *a = &LAND[land_now][tcur.near];
         v->voices = a->colour;
@@ -651,7 +685,7 @@ static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floo
     int k;
     /* its size: -6..-2 dB, moved a little by the governor's headroom (the target less the mix's level now): the trim
      * and the make-up answer the same deficit, so the voice's own share of it is small (Phase 3: 0.8 per dB) */
-    v->base_db = fm_clampf(-6.0f + 4.0f * frand() + 0.4f * fm_clampf(cd.target - cd.level20, -4.0f, 4.0f), -14.0f, 0.0f);
+    v->base_db = fm_clampf(-6.0f + 4.0f * frand() + 0.4f * fm_clampf(cd.target + cd.ebb20 - cd.level20, -4.0f, 4.0f), -14.0f, 0.0f);
     v->stay = 60.0f + 240.0f * frand();
     v->rise = 0.4f;                             /* with the governor's 0.16 dB/s this stays under the swell limit;
                                                  * the opening (play from silence) is quicker */
@@ -667,13 +701,13 @@ static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floo
     }
     v->crest = 0.0f;
     v->vowel = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + tcur.vowel, 0.0f, 1.0f);   /* enters where the weather and the cursor are */
-    v->idx = (0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx;
     v->hf = 1.0f;
     v->hand = 0;
     v->st = PV_ON;
     for (k = 0; k < 3; k++)                     /* a fresh breath: the walkers start near their centers */
         v->lw[k].x = fm_clampf(0.5f * v->lw[k].sd * gauss(), v->lw[k].lo, v->lw[k].hi);
     pad_note_on(v, i);
+    v->idx = (0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx * v->hk;
     cd.since_entry = 0.0f;
     {   /* the next entrance no sooner than 6-46 s, mostly the short end (the square of a uniform draw: median 16 s).
          * Phase 4 and before: 10 s flat, and a third of all entrances came 9.5-10.5 s apart, a 10-15 s rhythm in the
@@ -767,8 +801,9 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off,
     b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v
                   + tcur.vowel, 0.0f, 1.0f);   /* + the cursor's vowel (Phase 4) */
     v->vowel = slew(v->vowel, b, 0.02f, 0.02f, 32.0f / EN_SR);
-    v->idx = slew(v->idx, (0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx
-                  + 0.1f * v->crest * tcur.bloom, 0.01f, 0.01f, 32.0f / EN_SR);   /* x the cursor's index and bloom */
+    v->idx = slew(v->idx, ((0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx
+                  + 0.1f * v->crest * tcur.bloom) * v->hk, 0.01f, 0.01f, 32.0f / EN_SR);   /* x the cursor's index and bloom,
+                                                 * x the note's height (Phase 5c: a high voice is rounder) */
     vw = v->vowel * 2.999f;
     a = (int)vw;
     vw -= (float)a;
@@ -1797,6 +1832,28 @@ static void pool_set(uint32_t p)
 }
 
 /* ------------------------------------------------- TIDE: the conductor --- */
+/* Phase 5c: the ebb (Tomorrow's Man, TESTING #25: "the excerpt on the whole stays the same loudness"; Eno's 1/1 "sometimes
+ * made you feel as if it was over before a swell or motif came back in. This never relents to that extent"). The
+ * layers' rests are independent and the governor levels what is left, so the garden as a whole never went out. Now,
+ * every so often, it does: every layer's gain sinks together at EBB_FALL, the bells go to a lull,
+ * the garden stays at the bottom for EBB_HOLD, and comes back at EBB_RISE, two and a half times quicker than it went
+ * (Tomorrow's Man, TESTING #15: back up more quickly than it fades down). Not silence (his "I always want something burbling
+ * away", #17): the foundation's voice or the bass still sounds, far off, and the bottom is a place, EBB_DEPTH under
+ * the Density target (the Definition of done's line is 20 dB on the 60 s loudness), not a drop. The governor's
+ * target sinks with it, so nothing is lifted to fill it. This is DESIGN section 8's composed silence, at the pace
+ * section 6's rate limits allow. Gaps in Drift's time (Hold stops the tide too), the bottom in real seconds. */
+#define EBB_GAP ((5.0f + 11.0f * frand()) * 60.0f)    /* Drift seconds between ebbs: 10-32 minutes at Garden's half speed */
+#define EBB_DEPTH (11.0f + 5.0f * frand())            /* dB under the Density target: where this ebb's bottom lies (3 s meter).
+                                                       * (The one dip Tomorrow's Man saw in the 5b take's waveform, 1:40-1:55, was 4-7 dB
+                                                       * under, and "this never relents": a take with bottoms at 9-14 read 9-15 dB
+                                                       * under on the 60 s loudness, so the servo holds within a dB) */
+#define EBB_MOST 17.0f                                /* dB: the most an ebb takes off the gains */
+#define EBB_HOLD (45.0f + 120.0f * frand())           /* seconds at the bottom */
+#define EBB_FALL 0.1f                                 /* dB/s: 1-2.5 minutes going out */
+#define EBB_RISE 0.25f                                /* dB/s: 35-65 s coming back; with a voice's 0.4 and the gains' 0.16
+                                                       * it sits under the swell limit's 1.0 (a first take at 0.3: the pad's
+                                                       * p99.9 rate 0.93 dB/s, from 0.86) */
+
 static void conductor_reset(void)               /* a new piece: the weather and seasons start afresh */
 {
     int i, k;
@@ -1834,6 +1891,11 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     }
     cd.pad_thin = 0;
     cd.floor_hold = 0.0f;
+    cd.ebb = cd.ebb20 = cd.ebb3 = 0.0f;
+    cd.ebbing = 0;
+    cd.ebb_t = 0.0f;
+    cd.ebb_next = EBB_GAP;
+    cd.ebb_depth = cd.ebb_hold = 0.0f;
     cd.pad_target = 0;
     cd.since_entry = 100.0f;
     cd.entry_gap = 10.0f;
@@ -1953,7 +2015,45 @@ static void governor_step(float dt)
     /* loudness: the 20 s meter against the target; inside the band (±1.5 dB) nothing; outside, the trim moves, at most
      * 0.06 dB/s up and 0.1 down (2026-11-08: Phase 3 moved 0.1 dB/s on a ±1 dB band and chased the meter's bell
      * strikes, ±3 dB in minutes; the 60 s one-pole was tried and lags a layer's leaving by minutes) */
-    err = cd.level20 - cd.target;
+    /* Phase 5c: the ebb (the note above conductor_reset). Its own slews, outside the gains' 0.16 dB/s; the meter is
+     * compared with the target less the ebb as a 20 s meter hears it, so the trim neither chases the ebb down nor
+     * lifts into it */
+    {
+        float want = 0.0f;
+        if (cd.ebbing) {
+            {   /* the bottom is a place, not a drop: the garden's own level (the 3 s meter less the ebb as that meter
+                 * hears it) is taken down to ebb_depth under the target. If the garden thins by itself meanwhile (a lone
+                 * voice's walkers can take it 10 dB down in a minute) the ebb gives the difference back. Three takes with
+                 * the ebb as a drop of 9-16 dB and a floor on the 20 s meter: 19.1, 19.3 and 20.9 dB under the target at
+                 * the deepest (the Definition of done's line: 20) */
+                const float nat = 3.0103f * fm_log2f(fm_maxf(cd.m3, 1e-9f)) - cd.ebb3;
+                want = fm_clampf(cd.target - cd.ebb_depth - nat, -EBB_MOST, 0.0f);
+            }
+            if (cd.ebb <= want + 1.0f)
+                cd.ebb_hold -= dt;              /* at the bottom */
+            if (cd.ebb_hold <= 0.0f) {
+                cd.ebbing = 0;
+                cd.ebb_t = 0.0f;
+                cd.ebb_next = EBB_GAP;
+                want = 0.0f;
+            }
+        } else {
+            cd.ebb_t += dt * cd.speed;
+            if (cd.ebb_t > cd.ebb_next && cd.opening <= 0.0f && cd.ebb > -0.5f &&
+                cd.level20 > cd.target - 5.0f) {   /* from a garden that is in: an ebb out of a thin stretch is not heard as one */
+                cd.ebbing = 1;
+                cd.ebb_depth = EBB_DEPTH;
+                cd.ebb_hold = EBB_HOLD;
+                cd.bact.x = fm_minf(cd.bact.x, -1.0f - 0.4f * frand());   /* the bells: to a lull, and their own way back */
+                bells.busy = 0.0f;
+                want = cd.ebb;
+            }
+        }
+        cd.ebb = slew(cd.ebb, want, EBB_RISE, EBB_FALL, dt);
+        cd.ebb20 += (cd.ebb - cd.ebb20) * fm_minf(dt * (1.0f / 20.0f), 1.0f);
+        cd.ebb3 += (cd.ebb - cd.ebb3) * fm_minf(dt * (1.0f / 3.0f), 1.0f);
+    }
+    err = cd.level20 - (cd.target + cd.ebb20);
     /* Phase 5 (Tomorrow's Man, TESTING #17: the piece may grow quieter, and no rule should fill a quiet stretch): the band is
      * one-sided. Over the target by 1.5 dB the trim comes down (0.15 dB/s: too loud is the fault); it lifts only when
      * the mix is more than 6 dB under (Phase 4: 1.5), by at most 6 dB (Phase 4: 9), and a lift relaxes at 0.02 dB/s
@@ -1962,8 +2062,15 @@ static void governor_step(float dt)
         cd.trim = fm_maxf(cd.trim - fm_minf(err * (1.0f / 3.0f), 1.0f) * 0.15f * dt, -12.0f);   /* its full rate from 3 dB over (was 6) */
     else if (err < -6.0f)
         cd.trim = fm_minf(cd.trim + fm_minf((-6.0f - err) * (1.0f / 6.0f) + 0.2f, 1.0f) * 0.06f * dt, 6.0f);
-    else                                        /* inside: back toward 0, either way */
-        cd.trim = cd.trim > 0.0f ? fm_maxf(cd.trim - 0.02f * dt, 0.0f) : fm_minf(cd.trim + 0.02f * dt, 0.0f);
+    else {                                      /* inside: back toward 0, either way */
+        /* Phase 5c: a lift is handed back as the garden returns. Once the mix is within 3 dB of its target again (the
+         * 20 s meter or the 3 s one) a raised trim comes down at the cut's 0.15 dB/s, not the relaxing 0.02: in a
+         * take the trim sat at +6 and the make-up at +3 through a 14 dB lull, the bass and a pad voice came back
+         * together under them, and the 60 s loudness went 5.8 dB over (4:47) before the cut began */
+        const float err3 = 3.0103f * fm_log2f(fm_maxf(cd.m3, 1e-9f)) - (cd.target + cd.ebb3);
+        const float back = err > -3.0f || err3 > -3.0f ? 0.15f : 0.02f;
+        cd.trim = cd.trim > 0.0f ? fm_maxf(cd.trim - back * dt, 0.0f) : fm_minf(cd.trim + 0.02f * dt, 0.0f);
+    }
     /* the make-up for a resting layer (the bells, the bass): the conductor knows what it is taking away, so it
      * gives the energy back as the layer fades (and takes it back as it returns) instead of waiting for the meter.
      * What is missing is the layer's energy as it left (before its gain, so today's gain applies), weighted as the
@@ -2017,7 +2124,7 @@ static void governor_step(float dt)
      * little softer, rounder (bell_voice) and a few more (loop_target): cd.alone, 0..1.) */
     {
         const float others = K_W[L_PAD] * cd.e20[L_PAD] + K_W[L_BASS] * cd.e20[L_BASS] + K_W[L_GROUND] * cd.e20[L_GROUND];
-        company = fm_clampf(0.6f * (3.0103f * fm_log2f(fm_maxf(others, 1e-9f)) - cd.target + 4.0f), -9.0f, 0.0f);
+        company = fm_clampf(0.6f * (3.0103f * fm_log2f(fm_maxf(others, 1e-9f)) - (cd.target + cd.ebb20) + 4.0f), -9.0f, 0.0f);
         cd.alone += (company * (-1.0f / 9.0f) - cd.alone) * fm_minf(dt * (1.0f / 20.0f), 1.0f);
         company *= 4.0f / 9.0f;
     }
@@ -2034,7 +2141,7 @@ static void governor_step(float dt)
                          0.16f, 0.16f, dt);    /* the bells are struck notes: the governor never lifts them (Phase 4: at most
                                                 * 3 dB, and it sat there; before that +9 to +15 in a thin garden, Tomorrow's Man's loud
                                                 * lone bells), it turns them down with the mix, and by their company */
-        cd.g[k] = fm_db2lin(cd.gdb[k]);
+        cd.g[k] = fm_db2lin(cd.gdb[k] + cd.ebb);   /* Phase 5c: and the ebb, on its own slews */
     }
     if (cd.share[L_PAD] > cap + 0.05f && cd.lead[L_PAD] > 120.0f)
         cd.pad_thin = 1;                        /* (never with fewer than three layers sounding: cap is 2) */
@@ -2049,8 +2156,9 @@ static void governor_step(float dt)
      * walkers' means are not biased (Phase 3's continuous calls were: see the note at the end of this function). */
     {
         int active = 0;
+        const float eg = fm_db2lin(cd.ebb20);
         for (k = 0; k < L_GROUND; k++)
-            active += cd.e20[k] > 1e-3f;        /* sounding above -30 dB */
+            active += cd.e20[k] > 1e-3f * eg * eg;   /* sounding above -30 dB (Phase 5c: less the ebb) */
         cd.silent = active ? 0.0f : cd.silent + dt;
         cd.under = err < -12.0f ? cd.under + dt : fm_maxf(cd.under - dt, -1000.0f);   /* Phase 5: 12 dB under (was 6): a quiet
                                                                                        * stretch is the music, a vanishing one is not */
@@ -2083,7 +2191,7 @@ static void pad_step(float dt)
     cd.since_entry += dt;
     /* how many voices: the pad's presence, the density, the Density knob, the governor */
     want = fm_clampf(cd.pres[L_PAD].x + 0.25f * cd.dens + 0.3f * (float)(par[P_DENSITY] - 40) * (1.0f / 60.0f)
-                     + 0.05f * fm_clampf(cd.target - cd.level20, -4.0f, 2.0f), 0.0f, 1.0f);   /* the governor: fewer voices when the
+                     + 0.05f * fm_clampf(cd.target + cd.ebb20 - cd.level20, -4.0f, 2.0f), 0.0f, 1.0f);   /* the governor: fewer voices when the
                                                  * mix is over its target, and only a little more of them when it is under (Phase 5,
                                                  * TESTING #17; +4 here kept a voice singing 95% of the time once the bells were sparse) */
     want_n = want < 0.3f ? 0 : want < 0.6f ? 1 : want < 0.85f ? 2 : 3;   /* about 25% / 38% / 25% / 12% */
@@ -2156,13 +2264,18 @@ static void pad_step(float dt)
                     v->st = PV_OUT;
             }
         }
-        tgt = v->st == PV_ON ? v->base_db + v->lw[0].x + v->lw[1].x + v->lw[2].x : -60.0f;
+        {   /* Phase 5c: the crest's ceiling (PAD_CREST) and the note's height (PAD_TILT) */
+            float sw = v->lw[0].x + v->lw[1].x + v->lw[2].x;
+            if (sw > 0.5f * PAD_CREST)
+                sw = fm_minf(0.5f * PAD_CREST + 0.25f * (sw - 0.5f * PAD_CREST), PAD_CREST);
+            tgt = v->st == PV_ON ? fm_minf(v->base_db + sw, PAD_TOP) + v->tilt : -60.0f;
+        }
         /* (Phase 5b: a voice rising in another's shadow, 20 dB or more under the loudest, comes up at 2 dB/s: it is a
          * hundredth of the pad's energy there, so the pad's level does not move with it, and the minute and a half an
          * entrance from -52 dB took before it could be heard is a quarter of that) */
         v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f || (v->st == PV_ON && v->ldb < top - 20.0f) ? 2.0f : v->rise,
                       v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : v->fall, dt);
-        v->crest = fm_clampf((v->ldb - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
+        v->crest = fm_clampf((v->ldb - v->tilt - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
         if (v->st == PV_OUT && v->ldb <= -50.0f) {
             v->st = PV_OFF;
             v->rest = 20.0f + 40.0f * frand();
@@ -2189,11 +2302,17 @@ static void pad_step(float dt)
          * its new note from where it is */
         int best = -1, k;
         for (i = 0; i < EN_NPAD; i++) {
-            int dup = 0;
+            int dup = 0, same = 0;
             if (pad[i].st != PV_OFF || pad[i].rest > 0.0f)
                 continue;
-            for (k = 0; k < EN_NPAD; k++)
+            for (k = 0; k < EN_NPAD; k++) {
                 dup |= k != i && pad[k].st == PV_ON && (int)pad[k].note % 12 == (int)pad[i].target % 12;
+                same |= k != i && pad[k].st != PV_OFF && pad[k].ldb > -30.0f && (int)pad[k].note == (int)pad[i].target;
+            }
+            if (same)
+                continue;                       /* Phase 5c: never the very note another voice is singing or still
+                                                 * dissolving on (two voices on C#5 at 3:39 of the 5b take: one frequency,
+                                                 * twice, into the plate); it waits, or another voice goes */
             if (!dup) {
                 best = i;
                 break;
@@ -2203,8 +2322,13 @@ static void pad_step(float dt)
         }
         if (best < 0)
             for (i = 0; i < EN_NPAD; i++)
-                if (pad[i].st == PV_OUT && pad[i].ldb < -30.0f && !pad[i].hand && (best < 0 || pad[i].ldb < pad[best].ldb))
-                    best = i;
+                if (pad[i].st == PV_OUT && pad[i].ldb < -30.0f && !pad[i].hand && (best < 0 || pad[i].ldb < pad[best].ldb)) {
+                    int same = 0;
+                    for (k = 0; k < EN_NPAD; k++)
+                        same |= k != i && pad[k].st != PV_OFF && pad[k].ldb > -30.0f && (int)pad[k].note == (int)pad[i].target;
+                    if (!same)
+                        best = i;
+                }
         if (best >= 0)
             pad_enter(&pad[best], best);
     }
@@ -2455,6 +2579,7 @@ static void conductor_step(void)                /* every CTRL_N samples */
     en_cond[CD_BELL_ACT] = BELL_ACT + cd.bact.x + BELL_BRIDGE * cd.alone;
     en_cond[CD_ALONE] = cd.alone;
     en_cond[CD_FIELD_PCS] = (float)rot12(pool, froot);
+    en_cond[CD_EBB] = cd.ebb;
 }
 
 static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */
@@ -2824,7 +2949,9 @@ static void render_pad(uint32_t n)
     uint32_t j0;
     for (j0 = 0; j0 < n; j0++)
         padl[j0] = padr[j0] = padm[j0] = 0.0f;
-    const float g = pad_vol * 0.36f * cd.g[L_PAD];   /* AMB-1: 0.5; TIDE sits the pad 3 dB lower among the layers */
+    const float g = pad_vol * 0.40f * cd.g[L_PAD];   /* AMB-1: 0.5; TIDE sits the pad lower among the layers (0.36 until
+                                                      * Phase 5c: the crest's ceiling and the height's tilt took 3.5 dB off the
+                                                      * pad's median level in a first take, its share 45% to 33%; 0.9 dB back) */
     pad_gain += (pad_gate - pad_gain) * fm_minf((float)n / ((pad_gate > 0.0f ? 2.0f : 5.0f) * EN_SR), 1.0f);
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
@@ -2845,7 +2972,7 @@ static void render_pad(uint32_t n)
                 pad_coefs(v, i);
                 tgt = v->lin * pad_gain * v->hf;
                 idx = v->idx;                    /* the Rhodes blooms: more overtones as the voice crests (in turns) */
-                h2 = tcur.h2;                    /* the cursor's second harmonic and saw (Phase 4) */
+                h2 = tcur.h2 * v->hk;            /* the cursor's second harmonic and saw (Phase 4); less of it higher up */
                 saw = tcur.saw;
             }
             if (!v->voices) {                    /* FM, the modulator at the anchor's ratio to the carrier (1: a Rhodes) */

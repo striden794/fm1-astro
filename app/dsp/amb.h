@@ -113,8 +113,9 @@ enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_P
        CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
        CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF,
        CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE,
-       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
-                                                           * under them is (0..1), the field's pitch classes (a 12-bit set, C = bit 0) */
+       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, CD_EBB, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
+                                                           * under them is (0..1), the field's pitch classes (a 12-bit set, C = bit 0);
+                                                           * Phase 5c: the ebb, dB (0: the tide is in) */
 extern const char *const EN_COND_NAME[EN_NCOND];
 extern volatile float en_cond[EN_NCOND];
 const char *en_anchor_name(void);              /* TIDE: the timbre cursor's nearest anchor (Phase 4) */
