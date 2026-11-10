@@ -543,3 +543,78 @@ After Tomorrow's Man's first listening (FINDINGS "Phase 3b"). Where the numbers 
   random fill had differed 12 to 2 notes between its runs). All pass.
 - **CPU**: per pad voice the FM branch gains one phase accumulator and one table read for the second harmonic's
   scale (it was a constant); the blend is a few dozen operations every 46 ms. Still unmeasured on the device.
+
+## 13. TIDE Phase 5: the harmonic field, and the retune after Tomorrow's Man's third listening (2026-11-09)
+
+Where the numbers of §11 and §12 differ, these win. All in `app/dsp/amb.c` unless said.
+
+- **The bells** (Tomorrow's Man, TESTING #20: "constant as well as sharp"; he counted 35 and more in three minutes at 3:27 of the
+  Phase 4 take, the events file has 58). `tick`: the loops step every `LOOP_STEP` = 12 sixteenths (three quarter notes;
+  AMB-1 and Phases 3–4: every quarter), each loop on its own sixteenth of the twelve (`LOOP_OFS` = 0, 3, 7, 10), so at
+  Garden's tempo a slot is 2.5 s, the cells are 33, 43, 58 and 73 s long (11–24 s before) and no two loops strike on
+  one beat. `loop_add`: velocities 10..63 (Tomorrow's Man's numbers; Phase 4 25..80). `loop_target`: Density × 0.028 × (1 + 0.5 ×
+  the weather's and the season's density) × `presf` (0..1.0, was 1.3), the trim only thinning; the governor's part of
+  `cd.dens` is not read (a raised trim had added a fifth to the count when the garden was thin). `bell_voice`: the
+  strike's attack is per note, `arate` = Bell tone's rate / (1 + 12 × (1 − velocity)), never slower than 80 ms: at
+  Garden's tone 20 ms at velocity 0.63 and 45 ms at 0.10 (4 ms for every note before). `render_bells`: gain 0.45 and
+  no lift (Phase 4: 0.32 with a +3 dB lift that sat at its ceiling: the same level in a full garden).
+- **The bells' company** (`governor_step`, `company`): the other layers' K-weighted 20 s energy against the target;
+  within 4 dB of it nothing, below that the bells' gain follows 0.6 dB a dB, to −9 dB. `gdb[L_BELLS]` = min(trim, 0)
+  + bias + company: the governor never lifts the bells.
+- **The governor is one-sided** (Tomorrow's Man, TESTING #17). The trim comes down when the 20 s level is 1.5 dB over the target
+  (0.15 dB/s, at its full rate from 3 dB over), lifts only when it is more than 6 dB under (0.06 dB/s, to +6 at the
+  most; Phase 4: ±1.5 dB, to +9) and relaxes to 0 at 0.02 dB/s inside. `cd.dens` takes the trim's thinning only
+  (clamp −0.4..0). The make-up for a resting layer is capped at 3 dB (was 6). The ensemble floor's `under` counts
+  12 dB under (was 6). The pad's `want` takes the governor's headroom as clamp(target − level, −4, +2) × 0.05 (was ±4).
+- **The foundation** (`pad_step`, `bass_step`, `pad_sings`): one sustained layer always sounds. While the bass is
+  resting or under −20 dB the pad sings a voice at least (`cd.floor_hold`; in a piece without a bass the Phase 4 rule
+  with the bells stands); the bass may begin a rest only when a pad voice is up (`pad_sings`: singing, within 15 dB
+  of full), and asks for one otherwise. The bells no longer count as company for this.
+- **The pad's rest is bounded** (`cd.pad_rest`, `cd.pad_rest_max`): with no voice singing for 240–600 s of Drift's
+  time (8–20 min at Garden's half speed) the pad's presence is lifted to 0.45 and a voice is asked for. (A first
+  final render had no pad voice through its whole eighth hour: the presence walker low, the bass present.)
+- **Pad entrances** (`cd.entry_gap`, drawn in `pad_enter`): the next no sooner than 6 + 40 r² s (r uniform; median
+  16 s; Phase 4: 10 s flat).
+- **The timbre cursor**: the season walkers 0.11 within ±0.18 (was 0.15, ±0.25), the weather's 0.27 within ±0.5 (was
+  0.25, ±0.45).
+- **The harmonic field** (DESIGN §7; `fld`, `froot`, `home_pool`, `rot12`, `field_home`, `field_step`,
+  `field_publish`, `en_field_name`). `pool` is now the field's scale relative to the field's root `froot`;
+  `home_pool` and `par[P_ROOT]` are the player's (home). `bell_note` and `pad_retarget` read `froot`. Two season
+  walkers (stepped at Drift's speed in `conductor_step`): `fld.mode` (center 0, tau `FLD_MODE_TAU` 60 min, sd 1.2,
+  ±3: the set's place in fifths from home, tilted by (Bright − 50) × 0.02) and `fld.root` (tau 100 min, sd 0.8, ±2:
+  the root's). When a walker is three quarters of a step from where the field is (`fld.shift`, `fld.move`) and the
+  field has lasted `fld.dwell` (`FLD_DWELL`, 17–30 season minutes: 34–60 min at Garden's half speed), a step is
+  asked for (`fld.pend`: ±1 the set, ±2 the root) and done at the next chord change that allows it
+  (`chord_change` → `field_step`), never at Hold:
+  - the set: the absolute pitch-class set is turned a fifth (`rot12` by 7 or 5) with the root held; allowed if
+    exactly one note leaves and one a semitone from it comes, and the root and its fifth stay in the scale (no
+    Locrian; a pentatonic can only go where its root stays); postponed while a pad voice above −40 dB still sings
+    the note that leaves (never bent). The bells' cells hold scale steps, so their note on that step plays the new
+    pitch from the next strike on.
+  - the root: a fifth up or down inside the same set (allowed if the new root and its fifth are in it); the
+    sounding chord's degree is renumbered so its notes stay, and the next chord is the new tonic.
+  After a step the walker is set on the new place (a way back is a full three quarters of a step again) and a new
+  dwell is drawn; a step that can never be done from here sets the walker back. The player's Root or scale
+  (`apply(P_ROOT)`, `pool_set`) and a new piece (`conductor_reset`) bring the field home. Exports:
+  `en_field_root`, `en_field_pool`, `en_field_name()` ("D Dorian"; a set without a name as "D 0x6AD"),
+  `en_cond[CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE]`.
+- **The plate, host only** (TESTING #18): `pl_w` is the tank's modulation rate (0.0001 rad a sample, 0.70 Hz, as it
+  was); `en_host_plate_mod(rate_hz, wander)` and the harness commands `plate_rate HZ` and `plate_wander` set the rate,
+  or put each of the two modulated allpasses on its own oscillator whose rate slides between 0.25 and 1.3 Hz (a new
+  target every 2–7 s, its own random numbers, so the music is untouched). The device's plate is unchanged.
+- **The harness** (`tools/render.c`): the CSV's `field` column is the engine's `en_field_name()` (it was the player's
+  root and mode); `root` and `mode` stay the player's. Note: the engine's music depends on how the host cuts its
+  blocks (`--env` cuts them at 100 ms), so a CSV-only run of a seed is another performance than the same seed with
+  `--env`; `tools/render.py` always renders the same way. `../tools/evolve_report.py`: the one-sided loudness line
+  (`loudness_over_db` 3 for `loudness_over_pct` 99, `loudness_under_db` 20, `silence_db` 30 for `silence_s` 20), the
+  bells per three minutes; `../tools/compare.py`: the rows to match.
+- **Tests** (`tests/host/amb_test.c`): the field (3 h at Drift 100: at least three changes and three fields, every
+  change one step, the root and its fifth always in the scale, the chord's tones always in the field; a new Root or
+  scale brings it home); Hold holds the field and its walkers, a chord asked for by hand included; the garden's 60 s
+  level never more than 3 dB over its target nor 15 under in 20 min (it was: within 3 dB three quarters of the time);
+  the pad's rest ends (no stretch without a voice over 720 s in 2 h at Drift 50); the pad-alone swell test takes the
+  99th percentile against the limits and caps the fastest second at twice them (its "p99.9" of 780 seconds was the
+  fastest second itself); the bell-tone test counts per bell struck (it had counted per MIDI message, nearly all
+  clock) over six minutes. All pass.
+- **CPU**: the field is a few dozen operations a conductor step and a chord change; the bells ring a third as often;
+  a bell voice carries its own attack rate. Still unmeasured on the device.

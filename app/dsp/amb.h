@@ -20,7 +20,8 @@
  * Over it all (TIDE), the CONDUCTOR: walkers on four timescales (notes, cells, weather of minutes,
  * seasons of hours) move the pad's voices, their breathing, the bells' count, the bass's and Ground's
  * presence, the brightness, the register and the space; a governor holds the mix near the DENSITY
- * target and lets no layer lead for long; nothing moves faster than the swell limit. DRIFT is the
+ * target (from above only: the piece may grow quieter) and lets no layer lead for long; the harmonic field
+ * (the scale and its root) moves over hours, a pitch class at a time; nothing moves faster than the swell limit. DRIFT is the
  * speed of all of it (fully down holds). AMB-1's arc and scheduled breath are gone; with EVOLVE a bell
  * loop still changes a note or sits out a pass.
  * Then, after Discreet Music's chain, an Echoplex (160 ms, fed back) and a tape loop (to ~5.6 s, two
@@ -111,10 +112,15 @@ enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_P
        CD_PRES_GROUND, CD_S_SPEED, CD_S_DENSITY, CD_S_BRIGHT, CD_SPEED, CD_LEVEL20, CD_LEVEL60, CD_TARGET, CD_TRIM,
        CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
        CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF,
-       CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, EN_NCOND };
+       CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE, EN_NCOND };
 extern const char *const EN_COND_NAME[EN_NCOND];
 extern volatile float en_cond[EN_NCOND];
 const char *en_anchor_name(void);              /* TIDE: the timbre cursor's nearest anchor (Phase 4) */
+/* TIDE Phase 5: the harmonic field as it is now (the player's Root and scale are home; the field moves from there
+ * over hours, a pitch class at a time): its root (a pitch class), its scale relative to that root, its name */
+extern volatile uint8_t en_field_root;
+extern volatile uint16_t en_field_pool;
+const char *en_field_name(char *buf16);        /* "D Dorian", "A Aeolian"; a scale with no name as "D 0x6AD" */
 
 /* the pure parts, for the tests and the screen */
 uint32_t en_euclid(int k, int n, int rot);     /* Bjorklund's pattern, as a bitmask (bit 0 = step 0) */
@@ -147,6 +153,7 @@ int en_tap_drums_on(void);                     /* Ground sounding (the pulse's s
 int en_tap_pad_state(int i);                   /* a pad voice: 0 off, 1 singing, 2 dissolving */
 void en_host_mute(int layer, int on);          /* mute a layer's output after the governor has heard it (solo renders) */
 void en_host_plate_exc(float k);               /* the plate's modulation depth, 0..1 of AMB-1's (an A/B, TESTING #18) */
+void en_host_plate_mod(float rate_hz, int wander);   /* its rate (0: as it is, 0.70 Hz), and the wandering mode (an A/B) */
 /* the governor's plate and echo energies each conductor step, to record (the mix pass) or replace (a solo pass):
  * with the muted layers' sends gone the effects return less, and the governor would steer differently */
 extern void (*en_host_meter_hook)(float *plate, float *echo);

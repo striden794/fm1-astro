@@ -21,6 +21,8 @@
  *   mode Dorian | mode 1          the mode and its pool;  root D | root 2;  pool 0xAAD (bits: root + i semitones)
  *   master 2048                   the MASTER pot's position, 0..4096 (the simulator's default is 2048)
  *   plate_exc 0.5                 host only: the plate's modulation depth, 0..1 of AMB-1's (an A/B for the ear)
+ *   plate_rate 1.9 | plate_wander host only: the plate's modulation rate in Hz (AMB-1: 0.7), or each half of the tank on
+ *                                 its own rate that wanders 0.25-1.3 Hz (TESTING #18, Phase 5)
  * --solo mutes the other three layers (en_host_mute: their dry sound and their sends), so a solo render's output
  * is that layer alone with its own echo and reverb, and the four solo renders sum to the mix (up to the output's
  * soft clip). The governor would then hear a thinner garden than in the mix pass and the passes would drift apart
@@ -359,6 +361,10 @@ static int run_cmd(const char *text, double t)
         }
     } else if (!strcmp(c, "plate_exc")) {       /* host only: the plate's modulation depth, 0..1 of AMB-1's (TESTING #18) */
         en_host_plate_exc((float)atof(n >= 2 ? a : "1"));
+    } else if (!strcmp(c, "plate_rate")) {      /* host only: the plate's modulation rate in Hz (0.7 is AMB-1's) */
+        en_host_plate_mod((float)atof(n >= 2 ? a : "0.7"), 0);
+    } else if (!strcmp(c, "plate_wander")) {    /* host only: each half's rate wanders 0.25-1.3 Hz, never periodic */
+        en_host_plate_mod(0.0f, 1);
     } else if (!strcmp(c, "mode")) {
         int m = n >= 2 ? find_name(a, EN_MODE_NAME, EN_NMODES) : -1;
         if (m < 0) {
@@ -443,7 +449,7 @@ static void csv_row(double t)
 {
     int pcs[5], i, pad_on = 0, bells_on = en_tap_bells_on(), bass_on = en_bass_level > 0.01f,
                 pulse_on = en_tap_drums_on(), p;
-    char chord[16];
+    char chord[16], field[16];
     uint64_t fr = en_tap_frames;
     pcs[0] = en_chord_root % 12;                /* the name is read from the root (as the web app does) */
     for (i = 0; i < EN_NPAD; i++) {
@@ -451,10 +457,10 @@ static void csv_row(double t)
         pad_on += en_pad_amp[i] > 0.01f;
     }
     en_chord_name(pcs, 5, chord);
-    fprintf(csv, "%.0f,%d,%d,%s,%s,%s,%s %s,%s,%s,%d,%d,%d,%.4f,%.4f,", t, en_playing, en_frozen,
+    /* root and mode: the player's (home); field: the engine's harmonic field as it is now (Phase 5) */
+    fprintf(csv, "%.0f,%d,%d,%s,%s,%s,%s,%s,%s,%d,%d,%d,%.4f,%.4f,", t, en_playing, en_frozen,
             piece_now >= 0 ? en_piece_name(piece_now) : "-", EN_NOTE_NAME[(root_now % 12 + 12) % 12],
-            EN_MODE_NAME[(unsigned)mode_now < EN_NMODES ? mode_now : 0], EN_NOTE_NAME[(root_now % 12 + 12) % 12],
-            EN_MODE_NAME[(unsigned)mode_now < EN_NMODES ? mode_now : 0], en_anchor_name(), chord,
+            EN_MODE_NAME[(unsigned)mode_now < EN_NMODES ? mode_now : 0], en_field_name(field), en_anchor_name(), chord,
             en_chord_root, en_tap_deg(), en_chord_n, (double)en_drift, (double)en_arc);
     fprintf(csv, "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d,%d,%d,%d,", (double)en_pad_level, (double)en_bass_level,
             (double)en_pad_amp[0], (double)en_pad_amp[1], (double)en_pad_amp[2], (double)en_pad_amp[3], pad_on,
