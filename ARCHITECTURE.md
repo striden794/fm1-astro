@@ -618,3 +618,71 @@ Where the numbers of §11 and §12 differ, these win. All in `app/dsp/amb.c` unl
   clock) over six minutes. All pass.
 - **CPU**: the field is a few dozen operations a conductor step and a chord change; the bells ring a third as often;
   a bell voice carries its own attack rate. Still unmeasured on the device.
+
+## 14. TIDE Phase 5b: the bells in the scale and between Phases 4 and 5, the wandering plate, the hand-over (2026-11-09)
+
+After Tomorrow's Man's fourth listening (TESTING #21, #23). Where the numbers of §11–§13 differ, these win. All in
+`app/dsp/amb.c` unless said.
+
+- **The bells' register, a bug since Phase 3b** (`bell_note`). The register walker was added to the note itself in
+  plain semitones (`n = base + s + ... + reg_now`), a chromatic transposition: at any register but 0 the bells played
+  another key, and 38–46% of all bell strikes in the Phase 3b, 4 and 5 renders are outside the scale (Phase 3: none).
+  Found from Tomorrow's Man's "sharper bell tones" at 3:27 of the Phase 4 take, where the bells were a major third down (55%
+  outside); his "gold" at 3:25 was a fourth down, which is nearly the same scale (12% outside). Now the walker moves
+  each loop's register and the root is found at or below it: `base = LOOP_BASE[l] + BELL_REG + reg_now`, then down to
+  the root. `BELL_REG` = −3: the four registers sit a minor third under AMB-1's (C5, G4, G5, D4).
+- **The bells' activity** (`cd.bact`, `BELL_ACT`, `BELL_BRIDGE`, `loop_target`, `bells_step`). A weather walker of
+  their own (center 0, tau 6 weather minutes, sd 0.8, −1.6..+1.2, in log2) multiplies the loops' count:
+  `d *= 2^(BELL_ACT + bact + BELL_BRIDGE × alone) × bell_amt`, `BELL_ACT` 0.9 (the count's center, 1.9 × Phase 5's),
+  `BELL_BRIDGE` 0.5, the ceiling 3 notes a loop (was 4). **A passage lets up**: once the walker has been over +0.2 for
+  `bells.busy_max` (150–390 real seconds, drawn each time) it is set to −0.5..−1.2 and finds its way back (without
+  the timer: 10 a minute and more for 28 minutes at a stretch). Garden 8 h: 4.6 strikes a minute; in any three
+  minutes 12 at the median, 31 at the 90th percentile, 50 at the most, none 21% of the time; 10 a minute and more 13%
+  of the time, 8.7 minutes at a stretch at the most (Phase 4: 62%, 94 minutes; Phase 5: never).
+- **The Bells knob is their amount** (`apply(P_BELLS)`, `bell_amt`): the level as before (v²) and the count with it,
+  (v / 65)^1.5 (1 at Garden's 65). Clips at 40 / 65 / 90: 1.6 / 4.7 / 6.1 strikes a minute, the dry level −17 / 0 /
+  +7 dB. Phase 6 puts the default at the knob's middle.
+- **Their tone** (`bell_voice`): the tone a strike takes is the knob's + 0.2 × the weather's brightness (`cd.br`,
+  ±0.12) − 0.12 × `cd.alone`, and it picks the ratio, the index, the index's decay and the attack; the index falls
+  with the note's height above G4 (half an octave of index an octave, to three octaves); the attack's softening by
+  velocity is `1 + 5 × (1 − vel)` (was 12): 11 ms at velocity 0.63 and 22 ms at 0.10 at Garden's tone (Phase 5:
+  20–45 ms; Phase 4: 4 ms). Velocities stay 0.10–0.63 (Tomorrow's Man's).
+- **Their company** (`governor_step`, `cd.alone`): `cd.alone` (0..1, 20 s smoothed) is how far the other layers sit
+  under the target (0 within 4 dB, 1 at 19 dB under); the bells' gain follows it down by 4 dB at the most (was 9),
+  and it rounds their tone and draws a few more of them out.
+- **The plate wanders** (Tomorrow's Man's choice, TESTING #23, clip F): what was the host-only A/B is the engine's.
+  `pl_wander` = 1; each modulated allpass has its own oscillator (`lfo_s/c`, `lfo2_s/c`) whose rate slides to a new
+  target in `pl_wlo` .. `pl_wlo + pl_wspan` (0.25–1.3 Hz) every 2–7 s (`plate_wander_step`, once a chunk, its own
+  generator `pl_rng`). Host: `en_host_plate_mod(hz, 0)` sets a steady rate (0.7: AMB-1's), `en_host_plate_range`.
+  Cost: one more two-multiply oscillator a sample.
+- **The plate's breathing and the swell limit.** With the wandering plate the pad's 3 s level (its solo render)
+  moves 1.8–2.0 dB/s and 3.1–3.4 dB in 2 s at the 99.9th percentile (steady plate: 0.89 and 1.27; the median moment
+  0.26 dB/s); narrowing the range (0.5–1.3, 0.7–1.6 Hz) does not change it (1.85), so it is the two halves beating,
+  not the slow end. `tools/render.py` therefore makes a sixth pass, `solo-pad-steady` (the knob log with
+  `plate_rate 0.7` first, `--meter-in`, `--env` so its blocks are cut as the others'): the same performance through
+  AMB-1's steady plate; `tools/evolve_report.py` judges the pad's swell limit on it (after checking that its trim,
+  note and voice columns equal the mix's) and reports the level as heard. A wording for Tomorrow's Man: TESTING #26.
+- **A pad voice enters from −52 dB** (`pad_enter`; was −45) and, **in another voice's shadow** (20 dB or more under
+  the loudest pad voice), rises at 2 dB/s (`pad_step`, `top`). In a take where the pad sat 5 dB lower than usual a
+  lone voice appearing at −45 came up through the report's floor with the plate filling behind it (3 dB/s, 57 such
+  seconds in 8 h, all 25–30 dB under the pad's median).
+- **The foundation's voice hands over** (`pad_step`, `relay`): while the pad is the one sustained layer
+  (`cd.floor_hold` > 0) a voice at the end of its stay stays until another voice is up (singing, above −15 dB), and
+  one is asked for (`want_n` ≥ 2). It used to leave at once and cross its successor 18 dB down: every quiet extreme
+  of the Phase 5 and first 5b takes (16–22 dB under the target). Garden 8 h: 13.3 dB under at the most (LUFS), and
+  7.7 on the engine's meter; twelve 20-minute runs from other seeds: 3–7 dB.
+- **`en_init` clears `en_playing` and `en_frozen`.** A host that calls it again (the tests, once a scenario) was still
+  playing, so its `en_play(1)` did nothing and the opening never ran. The device calls it once, at boot.
+- **Exports**: `en_cond[CD_BELL_ACT]` (the count's log2 factor), `[CD_ALONE]`, `[CD_FIELD_PCS]` (the field's pitch
+  classes as a 12-bit set, C = bit 0), so the harness's CSV has `c_bell_act`, `c_alone`, `c_field_pcs`.
+- **The report** (`../tools/evolve_report.py`): bell strikes outside the field, % (`events.txt` against
+  `c_field_pcs`, or the field's name in older runs); the bells' busy stretches (10 a minute and more: share of the
+  time, longest); the pad's swell limit through the steady plate, with the as-heard figures; the modulation peak above
+  a fitted parabola, for information (the straight line's largest miss sits on the first bins inside its fit, 67–75 s,
+  in most hours of most takes: TESTING #27). `../tools/compare.py`: rows to match.
+- **Tests** (`tests/host/amb_test.c`): every bell is a note of the field while the register walker crosses its
+  whole range (3 h at Drift 100: 600–1000 bells, none outside; the hook checks each strike against
+  `en_field_root/pool`); the bell-tone test counts zero crossings a second of ringing bell (per bell struck over six
+  minutes failed once the count rode a walker: 13 bells against 77); the pad-alone swell test runs through the steady
+  plate. All pass.
+- **CPU**: one oscillator more in the plate; a walker; nothing else of note. Still unmeasured on the device.

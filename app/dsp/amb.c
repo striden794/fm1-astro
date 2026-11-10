@@ -9,7 +9,8 @@
  * listens to the mix and each layer's share, global rate limits, and Ground, a rare low drone in the
  * pulse's place. The sounds (voices, bells, bass, echo, plate) are AMB-1's.
  * Phase 4: the timbre landscape and its cursor. Phase 5: the harmonic field (a scale on a root that moves over
- * hours, one pitch class at a time), the bells sparse and soft, the governor one-sided (ARCHITECTURE.md 11-13). */
+ * hours, one pitch class at a time), the bells sparse and soft, the governor one-sided. Phase 5b: the bells in the
+ * scale at every register and in passages that let up, the plate's modulation wandering (ARCHITECTURE.md 11-14). */
 #include "amb.h"
 #include "fastmath.h"
 #ifdef EN_HOST
@@ -334,7 +335,7 @@ const char *const EN_COND_NAME[EN_NCOND] = {
     "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
     "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
     "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff", "cursor_x", "cursor_y", "anchor",
-    "s_mode", "s_root", "field_shift", "field_move"};
+    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told. TIDE Phase 5: the field's scale, relative to the field's root */
@@ -594,7 +595,9 @@ static struct {
     walker_t bright, density, reg, space, chord;/* weather (minutes): the pad's tone, how many notes, the
                                                  * pad's register, the space, how long chords dwell */
     walker_t pres[NLAYERS];                     /* weather: each layer's presence */
-    float speed;                                /* Drift: time's multiplier; 0 holds */
+    walker_t bact;                              /* weather: the bells' activity, log2 of their count (passages and lulls) */
+    float alone;                                /* 0..1: how thin the garden under the bells is (their company, governor_step) */
+    float speed;                              /* Drift: time's multiplier; 0 holds */
     float wspeed;                               /* the weather's: speed times the season's */
     float dens, br;                             /* the combined density and brightness deviations */
     float opening;                              /* seconds of a quicker start left (from silence) */
@@ -655,7 +658,11 @@ static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floo
     v->fall = 0.2f + 0.1f * frand();            /* dissolving: 1.3 to 2 times slower than it came */
     {   /* from -45 dB after the gains: with the trim and the make-up at +15 dB in a thin stretch, a voice appearing at -45
          * before them was a step the ear and the swell check both caught (2026-11-09, at a pause in the 8 h render) */
-        const float from = -45.0f - fm_maxf(cd.gdb[L_PAD], 0.0f);
+        /* Phase 5b: from -52. In a take where the pad sat 5 dB lower than usual (its median -50 dB), a lone voice
+         * appearing at -45 came up through the report's floor (30 dB under the pad's median) with the plate filling
+         * behind it: 3 dB/s on the 3 s level, 57 such seconds in 8 h, all 25-30 dB under the pad's median and under
+         * the bass. Seven dB lower it appears under the floor in any take; the cost is 17 s more of a rise nobody hears. */
+        const float from = -52.0f - fm_maxf(cd.gdb[L_PAD], 0.0f);
         v->ldb = cd.opening > 0.0f ? -12.0f : v->st == PV_OUT ? fm_maxf(v->ldb, from) : from;
     }
     v->crest = 0.0f;
@@ -804,12 +811,18 @@ typedef struct {
 } bell_t;
 static bell_t bell[NBELL];
 static float bell_vol, btone;
+static float bell_amt = 1.0f;                   /* the Bells knob's part of the count: (Bells / 65)^1.5, 1 at Garden's 65 */
+#define BELL_ACT 0.9f                           /* the activity walker's center, log2 of the count against Phase 5's
+                                                 * (a first take at 0.5: 12 strikes in three minutes at the median, Phase 5's
+                                                 * 11; the middle of Phase 4's 42 and Phase 5's 11 is about 20) */
+#define BELL_BRIDGE 0.5f                        /* log2 more bells in a garden that has thinned to nothing under them */
 static struct {                                 /* TIDE: the bells as a layer (Tomorrow's Man, TESTING #11) */
     float ldb, lin;                             /* the layer's level in dB (slewed) and linear */
     walker_t lw[2];                             /* it breathes on two summed walkers */
     float rest_t, gap;                          /* weather seconds rested so far; how long this rest lasts */
     float stay_t, min_stay;                     /* weather seconds present so far; the least a stay lasts */
     float quiet;                                /* seconds since a bell rang: 20 s of none counts as out for the pad's floor */
+    float busy, busy_max;                       /* seconds the activity has been up; the most a passage lasts */
     uint8_t rest;                               /* sitting out: no bell rings (its presence is low) */
 } bells;
 static int8_t loop_note[EN_NLOOP][EN_LOOP_MAX];
@@ -854,6 +867,7 @@ static void scale_set(void)
 
 static int reg_now;                             /* the register shift (the register walker, whole semitones) */
 #define OFF_DOWN 32                             /* a loop offset of OFF_DOWN + o: the tone o, an octave down */
+#define BELL_REG (-3)                           /* the bells' registers against AMB-1's, semitones (the root is found under it) */
 
 static int bell_note(int l, int off)            /* a loop slot's note, from the chord's degree */
 {
@@ -863,8 +877,14 @@ static int bell_note(int l, int off)            /* a loop slot's note, from the 
     d = deg + off;
     oct = d / nsteps - down;
     s = steps[d % nsteps];
-    base = LOOP_BASE[l] - ((LOOP_BASE[l] - root) % 12 + 12) % 12;   /* the root at or below the register */
-    n = base + s + 12 * oct + 12 * par[P_BOCT] + reg_now;           /* the register walker moves the bells too */
+    /* the register walker moves the bells too: it moves each loop's register, and the root is found at or below
+     * that, so every note stays a note of the field. (Phase 3b to 5 added reg_now to the note itself: a transposition
+     * by plain semitones, and 38-46% of all bell strikes in those renders were outside the scale; found 2026-11-09
+     * from Tomorrow's Man's "sharper bell tones" at 3:27 of the Phase 4 take, the bells a major third down. BELL_REG: the
+     * bells sit a little lower than AMB-1's, where he heard a nylon guitar.) */
+    base = LOOP_BASE[l] + BELL_REG + reg_now;
+    base -= ((base - root) % 12 + 12) % 12;                         /* the root at or below the register */
+    n = base + s + 12 * oct + 12 * par[P_BOCT];
     while (n > 103)
         n -= 12;
     while (n < 36)
@@ -1113,7 +1133,15 @@ static int loop_target(void)
     float d = (float)par[P_DENSITY] * 0.028f * (1.0f + 0.5f * dens) * presf * fm_db2lin(0.7f * fm_minf(cd.trim, 0.0f));
     /* (the trim only thins: a raised trim no longer adds notes, which made the bells busiest when the garden was
      * thinnest, 33-41 a minute in a 40 min check on 2026-11-08) */
-    return (int)(fm_clampf(d, 0.0f, 4.0f) + frand());
+    /* Phase 5b (Tomorrow's Man, TESTING #21: "I don't want them too frequent always or too sparse always"; a middle ground
+     * between the Phase 4 take, 12.5 a minute and never letting up, and the Phase 5 take, 3.2): the count rides the
+     * bells' activity, a weather walker of its own (BELL_ACT: its center, log2; 0.33x to 2.3x about it), so a passage
+     * of bells comes, has the stage for some minutes and lets up; a thin garden draws them out a little (BELL_BRIDGE:
+     * his "bridge" at 3:25 of the Phase 4 take, the pad gone and the bells alone, sparse and low), where they are
+     * also softer and rounder (governor_step, bell_voice); and the Bells knob is their amount, count and level
+     * together (his question: one knob for frequency and amplitude): the count goes as (Bells / 65)^1.5. */
+    d *= fm_exp2f(BELL_ACT + cd.bact.x + BELL_BRIDGE * cd.alone) * bell_amt;
+    return (int)(fm_clampf(d, 0.0f, 3.0f) + frand());
 }
 static uint8_t loop_rest[EN_NLOOP];             /* this pass: silent (Evolve) */
 
@@ -1194,7 +1222,7 @@ static const int8_t LOOP_RAT[EN_NLOOP] = {0, 0, 1, -1};
 static void bell_voice(int l, int n, float vel, int32_t wait)
 {
     int i, best = 0, ri;
-    float lo = 9.0f, t60, p;
+    float lo = 9.0f, t60, p, tone;
     bell_t *v;
     for (i = 0; i < NBELL; i++) {               /* a free voice, or the quietest */
         float a = bell[i].on ? bell[i].amp : -1.0f;
@@ -1211,20 +1239,28 @@ static void bell_voice(int l, int n, float vel, int32_t wait)
     v->loop = (uint8_t)l;
     v->cph = v->mph = 0.0f;
     v->cinc = mtof((float)n) * (1.0f / EN_SR);
-    ri = par[P_BTONE] * 5 / 101 + LOOP_RAT[l];
+    /* Phase 5b: the tone a strike takes is the Bell tone knob's, moved by the weather's brightness (the bells brighten
+     * and darken with the garden, +-0.12 of the knob's range) and rounder when the garden under them is thin (to
+     * -0.12: nearly alone they are the plucked, nylon sound Tomorrow's Man heard at 3:25 of the Phase 4 take, TESTING #21, not
+     * the bright bell) */
+    tone = fm_clampf(btone + 0.2f * cd.br - 0.12f * cd.alone, 0.0f, 1.0f);
+    ri = (int)(tone * 100.0f) * 5 / 101 + LOOP_RAT[l];
     v->minc = v->cinc * RATIO[ri < 0 ? 0 : ri > 4 ? 4 : ri];
     v->amp = vel;
     t60 = 4.2f - (float)(n - 60) * 0.06f;       /* the low bells ring longer */
     t60 = fm_clampf(t60, 1.6f, 5.0f) * LOOP_DEC[l];
     v->adec = fm_expf(-6.9f / (t60 * EN_SR));
-    /* Bell tone: 0 a round, nearly pure tone; 100 a long metallic clang (index in radians, as turns) */
-    v->idx = (0.15f + 6.5f * btone * btone) * LOOP_IDX[l] * (0.6f + 0.4f * vel) * (1.0f / FM_TWO_PI);
-    v->idec = fm_expf(-6.9f / ((0.35f + 2.6f * btone) * EN_SR));
+    /* Bell tone: 0 a round, nearly pure tone; 100 a long metallic clang (index in radians, as turns). Phase 5b: the
+     * index falls with the note's height above G4, by half an octave of index an octave (a high note at the same
+     * index is the "harsher bright bell" of TESTING #21; a string's high notes are rounder, not sharper) */
+    v->idx = (0.15f + 6.5f * tone * tone) * LOOP_IDX[l] * (0.6f + 0.4f * vel) * (1.0f / FM_TWO_PI)
+             * fm_exp2f(-0.5f * fm_clampf((float)(n - 67) * (1.0f / 12.0f), 0.0f, 3.0f));
+    v->idec = fm_expf(-6.9f / ((0.35f + 2.6f * tone) * EN_SR));
     v->att = 0.0f;
     /* the strike: Bell tone's (~4 ms bright .. ~57 ms round, AMB-1's), and the softer the note the softer the mallet
-     * (Tomorrow's Man, TESTING #20: a longer attack). At Garden's tone: 20 ms at the loudest velocity (0.63), 45 ms at the
-     * softest; never slower than 80 ms */
-    v->arate = fm_maxf((0.0004f + 0.0056f * fm_minf(btone * 2.0f, 1.0f)) / (1.0f + 12.0f * fm_clampf(1.0f - vel, 0.0f, 1.0f)),
+     * (Tomorrow's Man, TESTING #20: a longer attack). Phase 5b, between the Phase 4 take's 4 ms for every note and Phase 5's
+     * 20-45 ms: at Garden's tone 11 ms at the loudest velocity (0.63), 22 ms at the softest; never slower than 80 ms */
+    v->arate = fm_maxf((0.0004f + 0.0056f * fm_minf(tone * 2.0f, 1.0f)) / (1.0f + 5.0f * fm_clampf(1.0f - vel, 0.0f, 1.0f)),
                        1.0f / (0.08f * EN_SR));
     p = (LOOP_PAN[l] + 1.0f) * (FM_PI / 4.0f);
     v->gl = fm_cosf(p);
@@ -1415,15 +1451,16 @@ typedef struct {
 static dl_t dl[L_N];
 static float pl_bw, pl_damp_l, pl_damp_r, pl_decay = 0.5f, pl_decay_t = 0.5f, pl_dd2 = 0.5f, lfo_s, lfo_c = 1.0f;
 static float pl_w = 0.0001f;                    /* the tank's modulation rate, radians a sample: 0.70 Hz (Dattorro's ~1 Hz at 29.8 kHz) */
-#ifdef EN_HOST
-/* host A/B for Tomorrow's Man's TESTING #18 answer ("try it faster, or an LFO that never lets it get metallic but lets it breathe
- * and morph"): the rate can be set, and in the wandering mode each of the two modulated allpasses has its own
+/* Phase 5b: the plate wanders (Tomorrow's Man, TESTING #18: "an LFO that never lets it get metallic but lets it breathe and
+ * morph"; of the four clips of TESTING #23 he chose F, "definitely"). Each of the two modulated allpasses has its own
  * oscillator whose rate slides between 0.25 and 1.3 Hz, a new target every 2-7 s, so the ripple a held note gets is
- * never periodic. Its random numbers are its own (the music's generator is not touched: the clips are one performance). */
+ * never periodic (AMB-1: one oscillator at 0.70 Hz for both, a steady ripple of 1.7 dB rms on a held pad note with a
+ * sharp line at 0.7 Hz; wandering 2.1 dB and no line). Its random numbers are its own: the music's generator is not
+ * touched. The host can still set a fixed rate for an A/B (en_host_plate_mod). */
 static float pl_w2 = 0.0001f, lfo2_s, lfo2_c = 1.0f, pl_wt[2] = {0.0001f, 0.0001f};
 static uint32_t pl_wleft[2], pl_rng = 0x1234567u;
-static uint8_t pl_wander;
-#endif
+static uint8_t pl_wander = 1;
+static float pl_wlo = 0.25f, pl_wspan = 1.05f;   /* the wander's rates, Hz: from, and how far above */
 static float pl_exc_k = 1.0f;                  /* the tank's modulation depth, 1 = Dattorro's 16 samples (host A/B, TESTING #18:
                                                 * on a held pad note it is a 0.7 Hz level ripple of several dB; found 2026-11-09) */
 
@@ -1468,14 +1505,12 @@ static inline void reverb(float in, float *ol, float *or_)
         lfo_c = c;
         mr = c;                                 /* the right half: the same oscillator, a quarter turn on */
     }
-#ifdef EN_HOST
-    if (pl_wander) {                            /* (host A/B) the right half on its own oscillator */
+    if (pl_wander) {                            /* the right half on its own oscillator */
         float s = lfo2_s + pl_w2 * lfo2_c, c = lfo2_c - pl_w2 * s;
         lfo2_s = s;
         lfo2_c = c;
         mr = c;
     }
-#endif
     a = allpass_mod(&dl[L_APL], (float)DS(672) + (float)EXC * pl_exc_k * lfo_s, x + pl_decay * fb_l, -0.7f);
     push(&dl[L_D1L], a);
     b = tap(&dl[L_D1L], DS(4453));
@@ -1673,7 +1708,11 @@ static void apply(int p, int v)
     par[p] = (int16_t)v;
     switch (p) {
     case P_PAD: pad_vol = (float)(v * v) * 0.0001f; break;
-    case P_BELLS: bell_vol = (float)(v * v) * 0.0001f; break;
+    case P_BELLS:                                /* the bells' amount: their level, and (Phase 5b) their count with it */
+        bell_vol = (float)(v * v) * 0.0001f;
+        bell_amt = (float)v * (1.0f / 65.0f);
+        bell_amt *= fm_sqrtf(bell_amt);
+        break;
     case P_BASS: bass_vol = (float)(v * v) * 0.0001f; break;
     case P_PULSE: pulse_vol = (float)(v * v) * 0.0001f; break;
 #if EN_PULSE
@@ -1773,6 +1812,8 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     walker_set(&cd.pres[L_BELLS], 0.5f, 14.0f * 60.0f, 0.3f, 0.0f, 1.0f);   /* rests below 0.3: about a quarter of the time */
     walker_set(&cd.pres[L_BASS], 0.5f, 19.0f * 60.0f, 0.3f, 0.0f, 1.0f);
     walker_set(&cd.pres[L_GROUND], 0.3f, 29.0f * 60.0f, 0.3f, 0.0f, 1.0f);   /* enters above 0.65: about 12% of the time */
+    walker_set(&cd.bact, 0.0f, 6.0f * 60.0f, 0.8f, -1.6f, 1.2f);            /* the bells' passages and lulls (loop_target) */
+    cd.alone = 0.0f;
     for (k = 0; k < L_GROUND; k++)              /* a piece begins with its layers present: the rests come later */
         cd.pres[k].x = fm_clampf(cd.pres[k].center + 0.5f * fm_fabsf(cd.pres[k].x - cd.pres[k].center), 0.0f, 1.0f);
     cd.wspeed = cd.speed;
@@ -1815,6 +1856,8 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     bass.stay_t = bells.stay_t = 0.0f;
     bass.min_stay = 300.0f + 420.0f * frand();   /* the first stay: 5-12 weather minutes before a rest may begin */
     bells.min_stay = 240.0f + 360.0f * frand();
+    bells.busy = 0.0f;
+    bells.busy_max = 150.0f + 240.0f * frand();
     walker_set(&bells.lw[0], 0.0f, 55.0f, 1.5f, -8.0f, 8.0f);     /* the bells' level breathes too */
     walker_set(&bells.lw[1], 0.0f, 130.0f, 1.5f, -8.0f, 8.0f);
     bells.rest = 0;
@@ -1967,11 +2010,16 @@ static void governor_step(float dt)
     }
     /* the bells' company (Tomorrow's Man, TESTING #20: nearly alone they need not be as loud as in a full garden; he measured
      * the same -28 dB peaks with only the low end under them as with everything): how far the other layers together
-     * sit under the target. Within 4 dB of it nothing; below that the bells follow them down 0.6 dB a dB, by at most
-     * 9 dB. So the bells are an ornament on what is there, never the thing that fills a thin stretch. */
+     * sit under the target. Within 4 dB of it nothing; below that the bells follow them down, by at most 4 dB
+     * (Phase 5: 0.6 dB a dB to 9 dB. Phase 5b, Tomorrow's Man's TESTING #21: the stretch he calls gold, 3:25 of the Phase 4
+     * take, is the bells nearly alone as the pad goes, and at Phase 5's -9 they would be 12 dB under where he heard
+     * them; what jarred at 3:27 was high, bright, out of the scale and three times as many. So alone they are a
+     * little softer, rounder (bell_voice) and a few more (loop_target): cd.alone, 0..1.) */
     {
         const float others = K_W[L_PAD] * cd.e20[L_PAD] + K_W[L_BASS] * cd.e20[L_BASS] + K_W[L_GROUND] * cd.e20[L_GROUND];
         company = fm_clampf(0.6f * (3.0103f * fm_log2f(fm_maxf(others, 1e-9f)) - cd.target + 4.0f), -9.0f, 0.0f);
+        cd.alone += (company * (-1.0f / 9.0f) - cd.alone) * fm_minf(dt * (1.0f / 20.0f), 1.0f);
+        company *= 4.0f / 9.0f;
     }
     for (k = 0; k < NLAYERS; k++) {
         float want;
@@ -2030,8 +2078,8 @@ static void governor_step(float dt)
 
 static void pad_step(float dt)
 {
-    int i, n_on, want_n;
-    float want;
+    int i, n_on, want_n, relay = 0;
+    float want, top = -99.0f;
     cd.since_entry += dt;
     /* how many voices: the pad's presence, the density, the Density knob, the governor */
     want = fm_clampf(cd.pres[L_PAD].x + 0.25f * cd.dens + 0.3f * (float)(par[P_DENSITY] - 40) * (1.0f / 60.0f)
@@ -2079,6 +2127,9 @@ static void pad_step(float dt)
     if (!en_playing || cd.speed <= 0.0f)
         want_n = pad_count();                   /* resting, or Hold: no entrances, no leaves */
     cd.pad_target = want_n;
+    for (i = 0; i < EN_NPAD; i++)
+        if (pad[i].st != PV_OFF && pad[i].ldb > top)
+            top = pad[i].ldb;
     for (i = 0; i < EN_NPAD; i++) {             /* each voice: its walkers, its stay, its level */
         pad_t *v = &pad[i];
         float tgt;
@@ -2091,11 +2142,25 @@ static void pad_step(float dt)
         if (v->st == PV_ON) {
             if (cd.speed > 0.0f)
                 v->stay -= dt;
-            if (v->stay <= 0.0f)
-                v->st = PV_OUT;
+            if (v->stay <= 0.0f) {
+                /* Phase 5b: the foundation's voice hands over. While the pad is the one sustained layer (the bass away)
+                 * a voice at the end of its stay waits until another is up, and one is asked for: it used to leave
+                 * at once, its successor rising from far below as it fell, and where they crossed the garden was 18 dB
+                 * down for a minute (every quiet extreme of the Phase 5 and 5b takes: 16 to 22 dB under the target) */
+                int k, other = 0;
+                for (k = 0; k < EN_NPAD; k++)
+                    other |= k != i && pad[k].st == PV_ON && pad[k].ldb > -15.0f;
+                if (cd.floor_hold > 0.0f && !other && v->ldb > -30.0f)
+                    relay = 1;
+                else
+                    v->st = PV_OUT;
+            }
         }
         tgt = v->st == PV_ON ? v->base_db + v->lw[0].x + v->lw[1].x + v->lw[2].x : -60.0f;
-        v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f ? 2.0f : v->rise,
+        /* (Phase 5b: a voice rising in another's shadow, 20 dB or more under the loudest, comes up at 2 dB/s: it is a
+         * hundredth of the pad's energy there, so the pad's level does not move with it, and the minute and a half an
+         * entrance from -52 dB took before it could be heard is a quarter of that) */
+        v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f || (v->st == PV_ON && v->ldb < top - 20.0f) ? 2.0f : v->rise,
                       v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : v->fall, dt);
         v->crest = fm_clampf((v->ldb - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
         if (v->st == PV_OUT && v->ldb <= -50.0f) {
@@ -2109,6 +2174,8 @@ static void pad_step(float dt)
         v->lin = v->st == PV_OFF ? 0.0f : fm_db2lin(v->ldb);
     }
     n_on = pad_count();
+    if (relay && want_n < 2)
+        want_n = 2;                             /* the hand-over: the successor is asked for, the old voice kept */
     if (n_on > want_n) {                        /* one too many: the one nearest the end of its stay leaves */
         int best = -1;
         for (i = 0; i < EN_NPAD; i++)
@@ -2211,6 +2278,23 @@ static void bells_step(float dt)
     walk(&bells.lw[0], cd.speed);
     walk(&bells.lw[1], cd.speed);
     bells.quiet += dt;                          /* real seconds: a silence is heard in real time */
+    /* Phase 5b: a passage lets up (Tomorrow's Man, TESTING #21, of the Phase 4 take: "the density plays beautifully, but it never
+     * let up"). The activity walker alone can stay high for half an hour (a first 5b take: 10 strikes a minute and
+     * more for 28 minutes at a stretch), so, like the rests, a passage is bounded by a timer: after 2.5-6.5 minutes
+     * with the activity up it is set down to a lull and finds its own way back. Real minutes: a passage is heard in
+     * real time. The loops take the new count as each ends its pass, so the let-up comes over a minute. */
+    if (en_playing && cd.speed > 0.0f) {
+        if (cd.bact.x > 0.2f) {
+            bells.busy += dt;
+            if (bells.busy > bells.busy_max) {
+                cd.bact.x = -0.5f - 0.7f * frand();
+                bells.busy = 0.0f;
+                bells.busy_max = 150.0f + 240.0f * frand();
+            }
+        } else if (cd.bact.x < -0.1f) {
+            bells.busy = 0.0f;
+        }
+    }
     /* the rest, as the bass's: after a stay of 4-10 weather minutes at the least, when the presence is under 0.3;
      * 2.5-6 weather minutes once the layer has gone; back whatever the presence says, lifted to 0.42 */
     if (en_playing && cd.speed > 0.0f) {
@@ -2294,7 +2378,8 @@ static void conductor_step(void)                /* every CTRL_N samples */
     walk(&cd.chord, cd.wspeed);
     for (k = 0; k < NLAYERS; k++)
         walk(&cd.pres[k], cd.wspeed);
-    cd.dens = fm_clampf(cd.density.x + cd.s_density.x + fm_clampf(cd.trim * 0.05f, -0.4f, 0.0f), -1.0f, 1.0f);   /* the governor
+    walk(&cd.bact, cd.wspeed);
+    cd.dens =fm_clampf(cd.density.x + cd.s_density.x + fm_clampf(cd.trim * 0.05f, -0.4f, 0.0f), -1.0f, 1.0f);   /* the governor
                                                  * thins a loud garden; it no longer thickens a quiet one (Phase 5, TESTING #17) */
     cd.br = fm_clampf(cd.bright.x + cd.s_bright.x, -0.6f, 0.6f);
     reg_now = (int)(cd.reg.x + (cd.reg.x >= 0.0f ? 0.5f : -0.5f));
@@ -2367,6 +2452,9 @@ static void conductor_step(void)                /* every CTRL_N samples */
     en_cond[CD_S_ROOT] = fld.root.x;
     en_cond[CD_FIELD_SHIFT] = (float)fld.shift;
     en_cond[CD_FIELD_MOVE] = (float)fld.move;
+    en_cond[CD_BELL_ACT] = BELL_ACT + cd.bact.x + BELL_BRIDGE * cd.alone;
+    en_cond[CD_ALONE] = cd.alone;
+    en_cond[CD_FIELD_PCS] = (float)rot12(pool, froot);
 }
 
 static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */
@@ -2467,6 +2555,11 @@ void en_init(void)
     ground_lin = 0.0f;
     ground_on = 0;
     pad_gain = 0.0f;
+    en_playing = 0;                             /* a reset is a reset (Phase 5b: a host that calls en_init again, as the tests
+                                                 * do for each scenario, was still "playing", so its Play did nothing and
+                                                 * the opening never ran: two minutes of creeping in; the device calls
+                                                 * this once, at boot) */
+    en_frozen = 0;
     cd.speed = 1.0f;
     cd.opening = 0.0f;
     cd.acc = 0;
@@ -2611,19 +2704,7 @@ static void drain(void)
 #define BLK 256
 static float mixl[BLK], mixr[BLK], rsend[BLK], esend[BLK];
 static float lyl[BLK], lyr[BLK];                /* the layer being rendered, before it joins the mix */
-#ifdef EN_HOST
-static uint8_t host_mute[NLAYERS];
-void (*en_host_meter_hook)(float *plate, float *echo);   /* the governor's plate and echo energies, recorded or replayed */
-void en_host_plate_exc(float k) { pl_exc_k = fm_clampf(k, 0.0f, 1.0f); }
 #define PL_W(hz) ((hz) * (FM_TWO_PI / EN_SR))
-void en_host_plate_mod(float rate_hz, int wander)
-{
-    if (rate_hz > 0.0f)
-        pl_w = pl_w2 = PL_W(fm_clampf(rate_hz, 0.05f, 6.0f));
-    pl_wander = (uint8_t)(wander != 0);
-    pl_wt[0] = pl_wt[1] = pl_w;
-    pl_wleft[0] = pl_wleft[1] = 0;
-}
 static void plate_wander_step(uint32_t n)       /* once a chunk: each oscillator's rate slides to its target (1 s) */
 {
     int i;
@@ -2633,7 +2714,7 @@ static void plate_wander_step(uint32_t n)       /* once a chunk: each oscillator
     for (i = 0; i < 2; i++) {
         if (pl_wleft[i] <= n) {
             pl_rng = pl_rng * 1664525u + 1013904223u;
-            pl_wt[i] = PL_W(0.25f + 1.05f * (float)(pl_rng >> 8) * (1.0f / 16777216.0f));
+            pl_wt[i] = PL_W(pl_wlo + pl_wspan * (float)(pl_rng >> 8) * (1.0f / 16777216.0f));
             pl_rng = pl_rng * 1664525u + 1013904223u;
             pl_wleft[i] = (uint32_t)((2.0f + 5.0f * (float)(pl_rng >> 8) * (1.0f / 16777216.0f)) * EN_SR);
         } else {
@@ -2653,6 +2734,23 @@ static void plate_wander_step(uint32_t n)       /* once a chunk: each oscillator
         lfo2_s *= r;
         lfo2_c *= r;
     }
+}
+#ifdef EN_HOST
+static uint8_t host_mute[NLAYERS];
+void (*en_host_meter_hook)(float *plate, float *echo);   /* the governor's plate and echo energies, recorded or replayed */
+void en_host_plate_exc(float k) { pl_exc_k = fm_clampf(k, 0.0f, 1.0f); }
+void en_host_plate_mod(float rate_hz, int wander)
+{
+    if (rate_hz > 0.0f)
+        pl_w = pl_w2 = PL_W(fm_clampf(rate_hz, 0.05f, 6.0f));
+    pl_wander = (uint8_t)(wander != 0);
+    pl_wt[0] = pl_wt[1] = pl_w;
+    pl_wleft[0] = pl_wleft[1] = 0;
+}
+void en_host_plate_range(float lo_hz, float hi_hz)   /* the wander's range (an A/B) */
+{
+    pl_wlo = fm_clampf(lo_hz, 0.05f, 6.0f);
+    pl_wspan = fm_clampf(hi_hz - pl_wlo, 0.0f, 6.0f);
 }
 void en_host_mute(int layer, int on)
 {
@@ -3120,9 +3218,7 @@ static void control(uint32_t n)                 /* once a chunk: the fast things
     int i;
     mods_step(n);
     heads_step(n);
-#ifdef EN_HOST
     plate_wander_step(n);
-#endif
     pl_decay += ((en_frozen ? 0.9995f : pl_decay_t) - pl_decay) * 0.002f;
     pl_dd2 = fm_clampf(pl_decay + 0.15f, 0.25f, 0.5f);
     rev_in_gain += ((en_frozen ? 0.0f : 1.0f) - rev_in_gain) * 0.01f;

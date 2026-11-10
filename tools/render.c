@@ -21,8 +21,9 @@
  *   mode Dorian | mode 1          the mode and its pool;  root D | root 2;  pool 0xAAD (bits: root + i semitones)
  *   master 2048                   the MASTER pot's position, 0..4096 (the simulator's default is 2048)
  *   plate_exc 0.5                 host only: the plate's modulation depth, 0..1 of AMB-1's (an A/B for the ear)
- *   plate_rate 1.9 | plate_wander host only: the plate's modulation rate in Hz (AMB-1: 0.7), or each half of the tank on
- *                                 its own rate that wanders 0.25-1.3 Hz (TESTING #18, Phase 5)
+ *   plate_rate 0.7 | plate_wander host only: a steady modulation rate for the plate, in Hz (AMB-1's: 0.7), or back to the
+ *                                 engine's own (Phase 5b: each half of the tank on a rate that wanders 0.25-1.3 Hz)
+ *   plate_range 0.5 1.3           host only: the wandering plate's range of rates, Hz
  * --solo mutes the other three layers (en_host_mute: their dry sound and their sends), so a solo render's output
  * is that layer alone with its own echo and reverb, and the four solo renders sum to the mix (up to the output's
  * soft clip). The governor would then hear a thinner garden than in the mix pass and the passes would drift apart
@@ -363,6 +364,9 @@ static int run_cmd(const char *text, double t)
         en_host_plate_exc((float)atof(n >= 2 ? a : "1"));
     } else if (!strcmp(c, "plate_rate")) {      /* host only: the plate's modulation rate in Hz (0.7 is AMB-1's) */
         en_host_plate_mod((float)atof(n >= 2 ? a : "0.7"), 0);
+    } else if (!strcmp(c, "plate_range")) {     /* host only: the wandering plate's rates, Hz (the engine's: 0.25 1.3) */
+        if (n >= 3)
+            en_host_plate_range((float)atof(a), (float)atof(b));
     } else if (!strcmp(c, "plate_wander")) {    /* host only: each half's rate wanders 0.25-1.3 Hz, never periodic */
         en_host_plate_mod(0.0f, 1);
     } else if (!strcmp(c, "mode")) {

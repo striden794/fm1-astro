@@ -22,12 +22,20 @@ static int fails;
         }                                                                                                          \
     } while (0)
 
-static uint32_t midi_count, bell_count;
+static uint32_t midi_count, bell_count, bell_off;
+static int bell_lo = 127, bell_hi;
 void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2)
 {
-    (void)d1;
     midi_count++;
-    bell_count += st == 0x91u && d2 > 0u;       /* a bell struck (channel 2) */
+    if (st == 0x91u && d2 > 0u) {               /* a bell struck (channel 2) */
+        const uint32_t r = en_field_root, a = ((uint32_t)en_field_pool << r | (uint32_t)en_field_pool >> (12 - r)) & 0xFFFu;
+        bell_count++;
+        bell_off += !(a >> (d1 % 12u) & 1u);    /* outside the harmonic field as it is at the strike */
+        if ((int)d1 < bell_lo)
+            bell_lo = (int)d1;
+        if ((int)d1 > bell_hi)
+            bell_hi = (int)d1;
+    }
 }
 
 static uint32_t pat(const char *s)
@@ -335,7 +343,7 @@ int main(void)
          * three times as long */
         for (k = 0; k < 3; k++) {
             int b2, j;
-            long z = 0;
+            long z = 0, loud = 0;
             float prev = 0.0f;
             uint32_t m0;
             en_init();
@@ -351,15 +359,26 @@ int main(void)
             run(40.0f);                          /* TIDE: the bells fade in over the opening's 30 s */
             m0 = bell_count;
             for (b2 = 0; b2 < 360 * 44100 / 256; b2++) {   /* six minutes: the loops carry 0-3 notes each now */
+                long zb = 0;
+                float pk = 0.0f;
                 en_render(buf, 256, 2048);
                 for (j = 0; j < 256; j++) {
                     float x = (float)buf[2 * j];
-                    z += (x > 0.0f) != (prev > 0.0f);
+                    zb += (x > 0.0f) != (prev > 0.0f);
+                    if (fabsf(x) > pk)
+                        pk = fabsf(x);
                     prev = x;
                 }
+                if (pk > 8388608.0f * 0.0005f) {  /* a block in which a bell is ringing (over -66 dBFS) */
+                    z += zb;
+                    loud += 256;
+                }
             }
-            zc[k] = (float)z / (float)(bell_count - m0 > 0u ? bell_count - m0 : 1u);
-            printf("  bells alone, tone %d oct %d: %ld zero crossings in six minutes, %u bells (%.0f a bell); bells at %.1f dB, loops hold %d notes\n",
+            /* Phase 5b: crossings per second of ringing bell. (It was crossings per bell struck over the whole six
+             * minutes: with the bells' count riding its own walker one setting had 13 bells and another 77, and the
+             * silence between 13 bells counted for them.) */
+            zc[k] = (float)z * 44100.0f / (float)(loud > 0 ? loud : 1);
+            printf("  bells alone, tone %d oct %d: %ld zero crossings, %u bells (%.0f a second of ringing); bells at %.1f dB, loops hold %d notes\n",
                    TONE[k], OCT[k], z, bell_count - m0, (double)zc[k], (double)en_cond[CD_BELLS], en_tap_loop_notes());
         }
         CHECK(zc[1] > 1.5f * zc[0], "Bell tone 100 not brighter: %.0f vs %.0f", (double)zc[1], (double)zc[0]);
@@ -378,6 +397,10 @@ int main(void)
         int s, n1 = 0, n2 = 0;
         FILE *dump = fopen("app/build/tests/padalone.txt", "w");   /* per second: the level and the voices */
         en_init();
+        /* Phase 5b: through a steady plate. The engine's plate wanders now (Tomorrow's Man's choice, TESTING #23) and its
+         * breathing alone moves the pad's 3 s level about 2 dB/s at its fastest; the limit is about the conductor's
+         * moves (evolve_report judges the same way, on its steady-plate pass, and reports the level as heard) */
+        en_host_plate_mod(0.7f, 0);
         en_set(P_BELLS, 0);
         en_set(P_BASS, 0);
         en_set(P_PULSE, 0);
@@ -447,6 +470,7 @@ int main(void)
         CHECK(m1 <= 2.0f, "the pad's level moved %.2f dB in one second", (double)m1);
         CHECK(m2 <= 3.0f, "the pad's level moved %.2f dB in two seconds", (double)m2);
         CHECK(!bad, "NaN");
+        en_host_plate_mod(0.0f, 1);              /* the engine's plate again */
         /* the whole garden, 20 minutes: the governor's band is one-sided (Phase 5; Tomorrow's Man, TESTING #17: the piece may
          * grow quieter, it may not grow loud, and something always sounds): the 60 s level is never more than 3 dB
          * over its target and never more than 15 dB under it (the first two minutes are the opening). Phase 3-4
@@ -575,6 +599,8 @@ int main(void)
      * -20 dB within four minutes) */
     {
         int s, changes = 0, seen = 0, k, bad_step = 0, no_fifth = 0, off_field = 0, home_r, home_p;
+        float reg_lo = 0.0f, reg_hi = 0.0f;
+        uint32_t b0, o0;
         uint32_t fields[64], last;
         char nm[16];
         en_init();
@@ -587,10 +613,18 @@ int main(void)
         fields[seen++] = last;
         CHECK(home_r == 2 && home_p == EN_MODE_POOL[MODE_DORIAN], "the field starts at home (%s)", en_field_name(nm));
         printf("  the field, 3 h at Drift 100: %s", en_field_name(nm));
+        b0 = bell_count;
+        o0 = bell_off;
+        bell_lo = 127;
+        bell_hi = 0;
         for (s = 0; s < 3 * 3600; s++) {
             uint32_t f, a0, a1;
             int r0, r1;
             run(1.0f);
+            if (en_cond[CD_REGISTER] < reg_lo)
+                reg_lo = en_cond[CD_REGISTER];
+            if (en_cond[CD_REGISTER] > reg_hi)
+                reg_hi = en_cond[CD_REGISTER];
             f = (uint32_t)en_field_root << 16 | en_field_pool;
             r1 = en_field_root;
             a1 = ((uint32_t)en_field_pool << r1 | (uint32_t)en_field_pool >> (12 - r1)) & 0xFFFu;
@@ -623,6 +657,13 @@ int main(void)
         CHECK(bad_step == 0, "%d field changes were not one step", bad_step);
         CHECK(no_fifth == 0, "the root or its fifth left the scale at %d moments", no_fifth);
         CHECK(off_field == 0, "a chord tone outside the field at %d moments", off_field);
+        /* Phase 5b: every bell is a note of the field, wherever the register walker is (Phases 3b to 5 added the
+         * register to the note in plain semitones and 4 strikes in 10 were outside the scale; no test listened) */
+        printf("  %u bells (notes %d..%d), the register walker %.1f..%.1f st: %u outside the field\n", bell_count - b0, bell_lo,
+               bell_hi, (double)reg_lo, (double)reg_hi, bell_off - o0);
+        CHECK(bell_count - b0 > 200u, "only %u bells in 3 h at Drift 100", bell_count - b0);
+        CHECK(reg_hi - reg_lo > 4.0f, "the register walker moved only %.1f st", (double)(reg_hi - reg_lo));
+        CHECK(bell_off == o0, "%u bells outside the field", bell_off - o0);
         CHECK(!bad, "NaN");
         /* the player's key brings the field home */
         en_set(P_ROOT, 9);

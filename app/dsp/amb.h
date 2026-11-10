@@ -112,7 +112,9 @@ enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_P
        CD_PRES_GROUND, CD_S_SPEED, CD_S_DENSITY, CD_S_BRIGHT, CD_SPEED, CD_LEVEL20, CD_LEVEL60, CD_TARGET, CD_TRIM,
        CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
        CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF,
-       CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE, EN_NCOND };
+       CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE,
+       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
+                                                           * under them is (0..1), the field's pitch classes (a 12-bit set, C = bit 0) */
 extern const char *const EN_COND_NAME[EN_NCOND];
 extern volatile float en_cond[EN_NCOND];
 const char *en_anchor_name(void);              /* TIDE: the timbre cursor's nearest anchor (Phase 4) */
@@ -153,6 +155,7 @@ int en_tap_drums_on(void);                     /* Ground sounding (the pulse's s
 int en_tap_pad_state(int i);                   /* a pad voice: 0 off, 1 singing, 2 dissolving */
 void en_host_mute(int layer, int on);          /* mute a layer's output after the governor has heard it (solo renders) */
 void en_host_plate_exc(float k);               /* the plate's modulation depth, 0..1 of AMB-1's (an A/B, TESTING #18) */
+void en_host_plate_range(float lo_hz, float hi_hz);   /* the wandering plate's range of rates, Hz (Phase 5b: 0.25..1.3) */
 void en_host_plate_mod(float rate_hz, int wander);   /* its rate (0: as it is, 0.70 Hz), and the wandering mode (an A/B) */
 /* the governor's plate and echo energies each conductor step, to record (the mix pass) or replace (a solo pass):
  * with the muted layers' sends gone the effects return less, and the governor would steer differently */
