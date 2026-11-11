@@ -8,7 +8,7 @@
 #include "plat.h"
 #include "amb.h"
 
-#define APP_NAME "TIDE"
+#define APP_NAME "SAMSARA"
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
 #ifdef APP_VERSION                       /* a release build passes its own (tools/build.py --release) */
 #define EN_VERSION APP_VERSION
@@ -21,7 +21,8 @@
  * calibration at 0xDC000, where AMB-1 keeps it (it carries over) */
 enum { OBJ_PROJ, OBJ_PANEL, OBJ_NOBJ };
 #define APP_STORE_MAP {0xD8000u, 0xDC000u}
-#define PROJ_MAGIC 0x31444954u           /* "TID1" (AMB-1's is "ENO1": a record of its is not read) */
+#define PROJ_MAGIC 0x314D4153u           /* "SAM1" (AMB-1's is "ENO1": a record of its is not read). SAMSARA is the
+                                          * name Tomorrow's Man gave TIDE on 2026-11-10; "TIDE" in these files is the same work */
 #define PROJ_FORMAT 1u                   /* TIDE 1: AMB-1's format 4 and the main page's Mood and Space; another
                                           * format gives the recipes */
 #define NPIECES EN_NPIECES

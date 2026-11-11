@@ -139,7 +139,7 @@ void en_voice_lead(const int *from, const int *pcs, int ntones, int *to, int lo,
 const char *en_chord_name(const int *pcs, int n, char *buf);   /* "Em7", "Dsus4", "C" ... */
 
 /* the pieces: recipes for every parameter (Tune and MIDI out included, but they are the player's) */
-#define EN_NPIECES 8
+#define EN_NPIECES 4
 const char *en_piece_name(int i);
 void en_piece(int i, int16_t *par, uint16_t *pool);
 

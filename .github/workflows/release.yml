@@ -55,7 +55,7 @@ jobs:
       tests-block: true
       build: |
         set -euo pipefail
-        pkg=amb
+        pkg=samsara
         # the builder checks out without submodules: fm1-base (base/) and its felucca-bsp (base/bsp/), at the
         # commits this one links
         git submodule update --init --recursive
@@ -92,7 +92,7 @@ jobs:
         cp app/build/firmware.json build/release-assets/
       test: |
         set -euo pipefail
-        pkg=amb
+        pkg=samsara
         [ -f "app/build/$pkg.fwsc" ]
         sh tests/run_tests.sh
       packages: build/release-assets/*

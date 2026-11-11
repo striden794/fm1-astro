@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "id": "amb",
-  "name": "TIDE",
-  "author": "Charles Vestal",
+  "id": "samsara",
+  "name": "SAMSARA",
+  "author": "Tomorrow's Man, from AMB-1 by Charles Vestal",
   "license": "MPL-2.0",
-  "tagline": "A generative ambient machine for the FM-1",
-  "description": "AMB-1 turns the M-VAVE FM-1 into a generative ambient machine, inspired by Brian Eno's Music for Airports. It plays itself from the moment it's switched on: breathing voices, soft bells on tape loops of unequal length, a gliding bass and quiet Euclidean percussion, through a tape echo and a plate reverb. It has eight pieces, and it is an album as much as an instrument. You don't perform it, you tend it: pick a piece and a scale, take notes out, put them back, and let it grow.",
+  "tagline": "An ambient piece for the FM-1 that never repeats and never stands still",
+  "description": "SAMSARA turns the M-VAVE FM-1 into a slow generative ambient piece that changes in tone, harmony and density over hours: a pad, soft bells, a gliding bass and a rare low ground that come and go like weather, through a tape echo and a wandering plate. Four pieces (Samsara, Maranasati, Anatta, Nirvana) and four knobs: Mood, Density, Drift, Space. It is a fork of Charles Vestal's AMB-1.",
   "tags": ["ambient", "generative", "fm"],
   "install": "https://charlesvestal.github.io/fm1-amb/install/",
   "site": "https://charlesvestal.github.io/fm1-amb/",
@@ -16,5 +16,5 @@
     "flash": ["856014", "B36014"],
     "features": ["usb-audio-in", "screen-reader"]
   },
-  "credits": "Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments)."
+  "credits": "From AMB-1 by Charles Vestal. Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments)."
 }

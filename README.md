@@ -1,4 +1,9 @@
-# TIDE, from AMB-1, for the M-VAVE FM-1
+# SAMSARA, from AMB-1, for the M-VAVE FM-1
+
+**SAMSARA** is the name of this work since 2026-11-10; it was built as **TIDE**, and the notes below and the
+source's comments still call it that. Its four pieces are Samsara, Maranasati, Anatta and Nirvana (AMB-1's eight
+are not in it; each of the four began from one of AMB-1's recipes: `app/dsp/amb.c`), and its screen is lapis blue
+and gold.
 
 **TIDE** is a personal fork of Charles Vestal's AMB-1 (this tree, from v1.3.2: `UPSTREAM.md`) by Tomorrow's Man: the
 same sounds and platform under a conductor that changes the piece's tone, harmony and density over hours, and four

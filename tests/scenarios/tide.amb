@@ -100,7 +100,7 @@ wait 1000
 shot help_home.png
 release HOME
 wait 200
-# save and restore: Mood and Space on Garden, a different Mood on Voices, each kept with its piece
+# save and restore: Mood and Space on Samsara, a different Mood on Anatta, each kept with its piece
 spin K1 -15
 spin K4 12
 expect par28 -15

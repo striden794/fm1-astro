@@ -11,9 +11,9 @@ if (ex._initialize) ex._initialize();
 const cstr = (p) => { const m = new Uint8Array(ex.memory.buffer); let e = p; while (m[e]) e++; return new TextDecoder().decode(m.subarray(p, e)); };
 let fails = 0;
 const check = (ok, what) => { if (!ok) { console.log("FAIL", what); fails++; } };
-check(ex.app_npieces() === 8, "eight pieces");
-check(cstr(ex.app_piece_name(2)) === "Voices", "piece 2 is Voices");
-check(ex.app_piece_par(1, 18) === 60, "Departures' tempo 60");
+check(ex.app_npieces() === 4, "four pieces");
+check(cstr(ex.app_piece_name(1)) === "Maranasati", "piece 1 is Maranasati");
+check(ex.app_piece_par(1, 18) === 56, "Maranasati's tempo 56");
 check(cstr(ex.app_param_text(6, 100)) === "4.00x", "Drift's text");   // TIDE: Drift is the weather's speed
 check(cstr(ex.app_param_text(6, 0)) === "Hold", "Drift fully down");
 check(cstr(ex.app_param_text(28, 20)) === "+20", "Mood's text");
@@ -29,8 +29,8 @@ run(30);
 check(!bad && peak > 0.05 && peak < 1, `a piece plays (peak ${peak.toFixed(3)})`);
 const st = new Float32Array(ex.memory.buffer, ex.app_state(), ex.app_state_len());
 check(st[0] === 1 && st[16] > 100, "the state: playing, the grid running");
-for (let p = 0; p < ex.app_nparams(); p++) ex.app_set(p, ex.app_piece_par(2, p));   /* Voices */
-ex.app_pool(ex.app_piece_pool(2));
+for (let p = 0; p < ex.app_nparams(); p++) ex.app_set(p, ex.app_piece_par(1, p));   /* Maranasati: the Voices landscape */
+ex.app_pool(ex.app_piece_pool(1));
 ex.app_regrow();
 peak = 0;
 run(20);

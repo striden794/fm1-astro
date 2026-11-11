@@ -3,7 +3,7 @@
 wait 200
 listen
 wait 100
-said Tide page: Mood 0, Density 40, Drift 0.50 times, Space 0. Piece Garden, D Dorian, tempo 72, growing
+said Tide page: Mood 0, Density 40, Drift 0.50 times, Space 0. Piece Samsara, D Dorian, tempo 72, growing
 # (the garden follows, queued: the chord, how far to the next, the scale from the root up)
 listen
 where
@@ -60,11 +60,11 @@ said MODE Phrygian
 turn ALGO -1
 said MODE Dorian
 turn PRESET 1
-said PIECE Departures, C# Ionian, tempo 60
+said PIECE Maranasati, F Aeolian, tempo 56
 wait 300
 unsaid Level
 turn PRESET -1
-said PIECE Garden, D Dorian, tempo 74
+said PIECE Samsara, D Dorian, tempo 74
 wait 300
 # the buttons' messages, said once
 tap REC
@@ -88,7 +88,7 @@ said NEXT CHORD ON THE BAR
 # a help card: its button, then its lines
 press SAVE
 wait 1000
-said SAVE button. SAVES ALL EIGHT PIECES. KEEP HOLDING: THE PIECE BACK TO ITS RECIPE
+said SAVE button. SAVES ALL FOUR PIECES. KEEP HOLDING: THE PIECE BACK TO ITS RECIPE
 release SAVE
 tap SAVE
 said SAVED
@@ -112,4 +112,4 @@ wait 1000
 said Tempo 74
 # WHERE: everything again
 where
-said Tide page: Mood 0, Density 40, Drift 0.87 times, Space 0. Piece Garden, D Dorian, tempo 74, resting
+said Tide page: Mood 0, Density 40, Drift 0.87 times, Space 0. Piece Samsara, D Dorian, tempo 74, resting

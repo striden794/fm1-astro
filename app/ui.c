@@ -48,22 +48,24 @@ static const char *const KNOB_LABEL[NVIEWS][4] = {
 /* the screen's colours: the cover of Ambient 1: Music for Airports (1978), as the web app and the site.
  * The map's paper, its ink; the land's greens for the pad (the chord) and the scale, its rivers for the
  * bells; the bass and the pulse in darker inks. Each layer has a pale tint for the shapes at rest. */
-#define K_BG RGB(246, 238, 181)
-#define K_PANEL RGB(255, 251, 224)
-#define K_LINE RGB(208, 214, 150)
-#define K_DIM RGB(112, 106, 58)
-#define K_TEXT RGB(29, 27, 2)
-#define K_ACC RGB(64, 128, 124)          /* the accent: the page, the knob being turned, a message's word */
-#define K_BELL RGB(84, 153, 149)
-#define K_BELL_T RGB(176, 214, 206)
-#define K_PAD RGB(112, 142, 62)
-#define K_PAD_T RGB(208, 220, 146)
-#define K_PULSE RGB(70, 66, 28)
-#define K_PULSE_T RGB(214, 214, 160)
-#define K_BASS RGB(138, 128, 52)
-#define K_BASS_T RGB(222, 218, 160)
-#define K_FROST RGB(60, 132, 160)
-#define K_FROST_T RGB(170, 210, 216)
+/* SAMSARA's colours (Tomorrow's Man, 2026-11-10): the lapis blue and the gold of Tibetan painting. AMB-1's were a pale
+ * yellow ground with green and teal. */
+#define K_BG RGB(12, 26, 74)
+#define K_PANEL RGB(22, 42, 104)
+#define K_LINE RGB(50, 74, 138)
+#define K_DIM RGB(132, 150, 196)
+#define K_TEXT RGB(244, 218, 146)
+#define K_ACC RGB(234, 180, 60)          /* the accent: the page, the knob being turned, a message's word */
+#define K_BELL RGB(246, 202, 84)
+#define K_BELL_T RGB(98, 88, 76)
+#define K_PAD RGB(168, 200, 242)
+#define K_PAD_T RGB(44, 70, 128)
+#define K_PULSE RGB(198, 142, 46)
+#define K_PULSE_T RGB(72, 64, 70)
+#define K_BASS RGB(78, 128, 208)
+#define K_BASS_T RGB(30, 54, 116)
+#define K_FROST RGB(116, 204, 222)
+#define K_FROST_T RGB(36, 82, 116)
 
 static struct {
     uint8_t view;
@@ -884,7 +886,7 @@ static int help_lines(int b, const char *l[HELP_LINES])
     case B_REC: L("FREEZE: THE CHORD HOLDS"); L(" AND THE REVERB RINGS ON"); L("AGAIN: THAW"); break;
     case B_OCTDN: L("THE BELLS AN OCTAVE DOWN"); L("WITH OCT+, 5 S: UPDATE MODE"); break;
     case B_OCTUP: L("THE BELLS AN OCTAVE UP"); L("WITH OCT-, 5 S: UPDATE MODE"); break;
-    case B_SAVE: L("SAVES ALL EIGHT PIECES"); L("KEEP HOLDING: THE PIECE"); L(" BACK TO ITS RECIPE"); break;
+    case B_SAVE: L("SAVES ALL FOUR PIECES"); L("KEEP HOLDING: THE PIECE"); L(" BACK TO ITS RECIPE"); break;
     default: break;
     }
 #undef L
