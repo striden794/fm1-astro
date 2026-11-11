@@ -50,13 +50,15 @@ static const en_param_t PARAMS[P_NPARAMS] = {
     {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 1, 0},
     {"Bass oct", -1, 1, 0},   {"Glide", 0, 100, 20},    {"Fifth", 0, 100, 35},
     {"Swing", 0, 100, 0},     {"Hats", 0, 100, 50},
+    {"Mood", -50, 50, 0},     {"Space", -50, 50, 0},
 };
 const en_param_t *en_param_info(int i) { return (i >= 0 && i < P_NPARAMS) ? &PARAMS[i] : &PARAMS[0]; }
 
 /* the pieces: eight recipes for the whole garden (the FM-1's PRESETS, the web app's cards). Tune and
  * MIDI out are taken from here by neither: they belong to the player, not the piece.
  * TIDE reads them as: Pulse = the Ground layer's level; Drift = the weather's speed (0 holds, 50 = 1x);
- * Swell = how far the pad voices breathe; Hits, Swing, Hats: unused (the pulse is not played). */
+ * Swell = how far the pad voices breathe; Hits, Swing, Hats: unused (the pulse is not played). Mood and Space
+ * (Phase 6) are the player's offsets around a recipe and are 0 in every one (the initialisers end before them). */
 /*                     Pad Bel Bas Pul  Den Evo Dri Hit  Ech ET Rev Siz  Bri Swe Ton Mot  Tun MI Tem Rt Md Oc  PT  BO Gli Fif  Swi Hat
  * (PT: the pad's colour, 0 Rhodes, 1 Voices; BO: the bass's octave) */
 static const struct {
@@ -148,7 +150,7 @@ void en_param_text(int i, int v, char *b)
         *b = 0;
         return;
     }
-    if ((i == P_TUNE || i == P_BOCT || i == P_BASSOCT) && v > 0)
+    if ((i == P_TUNE || i == P_BOCT || i == P_BASSOCT || i == P_MOOD || i == P_SPACE) && v > 0)
         *b++ = '+';
     itoa_s(v, b);
 }
@@ -486,6 +488,8 @@ typedef struct {
 } pad_t;
 static pad_t pad[EN_NPAD];
 static float pad_gate, pad_gain, pad_vol, bright, swell;
+static float mode_tilt;                        /* Phase 6: how far Bright and Mood lean the mode walker, in mode steps */
+static float mood_br;                          /* and where Mood puts the center of the weather's brightness (cd.br) */
 static const float PAD_PAN[EN_NPAD] = {-0.55f, -0.18f, 0.18f, 0.55f};
 static const float VOICE_K[EN_NPAD] = {1.0f, 1.13f, 0.89f, 1.21f};   /* each voice's walkers a little apart */
 /* Phase 5c (Tomorrow's Man, TESTING #25: tones at ~530 and ~1060 Hz that "overwhelm when they become static", "almost a standing
@@ -1096,7 +1100,7 @@ static void chord_change(void)                  /* to another degree: the near, 
             /* the walker is set on the new place: going back takes a full three quarters of a step again (it had only
              * half a step to fall, and a field flipped to and fro: one 8 h take saw three fields in six changes) */
             if (stepped == 1)
-                fld.mode.x = (float)fld.shift - (bright - 50.0f) * 0.02f;
+                fld.mode.x = (float)fld.shift - mode_tilt;
             else
                 fld.root.x = (float)fld.move;
             fld.pend = 0;
@@ -1733,6 +1737,43 @@ static void swell_set(void)                     /* Swell: how far each voice's l
     }
 }
 
+/* Phase 6: the main page's Mood and Space. Each is an offset (-50..+50) around what the piece's own knobs say, so at
+ * 0 the piece is exactly its recipe (and a render is the same samples as before there were such knobs).
+ * Mood, dark .. bright: the pad's Bright moves with it, 0.6 of a point a step (+-30 points: the filter about an octave
+ * either way, the vowel and the FM index with it), and the mode walker leans 0.03 of a mode step a step (+-1.5 steps:
+ * fully bright, a piece at home in Dorian spends its hours around Mixolydian and Ionian; fully dark, Aeolian and
+ * Phrygian). And the center of the weather's brightness (cd.br: the pad's filter, vowel and FM index, the bells'
+ * tone and how often one rings an octave up) moves with it, MOOD_BR_DOWN .. MOOD_BR_UP. The pad is close to a sine,
+ * so its tone has only so far to go: on a held state (the same chord and voices; out/phase6's mood-sweep-held) the
+ * pad alone reads 338 Hz (rms frequency) at Mood 0, 312 at -50 and 425 at +50; with Bright's offset alone and no
+ * move of cd.br the bright side did not register. The walkers keep moving around the new center (DESIGN section 9).
+ * Space, near .. far: toward near, Reverb and Echo fall 0.6 of a point a step and Size (the plate's decay, the echo's
+ * feedback) 0.4; toward far, Echo rises 0.6 but Reverb only 0.3 and Size 0.2. The far side was first as long as the
+ * near: at +50 Garden's Reverb stood at 95 and its Size at 100, and on a held state the output rose 8.2 dB (11 over
+ * the target), with one note ringing in the plate within 3 dB of the whole target for 3.8 of 5 minutes: the standing
+ * tone of TESTING #25, made by a knob (measured 2026-11-10, out/phase6's space-sweep-held). */
+#define MOOD_BR_UP 0.50f                        /* cd.br's center at Mood +50 */
+#define MOOD_BR_DOWN 0.40f                      /* and how far under at -50 */
+static void mood_set(void)
+{
+    bright = fm_clampf((float)par[P_BRIGHT] + 0.6f * (float)par[P_MOOD], 0.0f, 100.0f);
+    mode_tilt = ((float)par[P_BRIGHT] - 50.0f) * 0.02f + 0.03f * (float)par[P_MOOD];
+    mood_br = (float)par[P_MOOD] * (par[P_MOOD] > 0 ? MOOD_BR_UP : MOOD_BR_DOWN) * 0.02f;
+}
+#define SPACE_FAR_REV 0.3f                      /* Reverb points a step of Space above 0 */
+#define SPACE_FAR_SIZE 0.2f                     /* and Size points */
+static void space_set(void)
+{
+    const float s = (float)par[P_SPACE];
+    const float e = fm_clampf((float)par[P_ECHO] + 0.6f * s, 0.0f, 100.0f);
+    const float r = fm_clampf((float)par[P_REVERB] + (s > 0.0f ? SPACE_FAR_REV : 0.6f) * s, 0.0f, 100.0f);
+    const float z = fm_clampf((float)par[P_SIZE] + (s > 0.0f ? SPACE_FAR_SIZE : 0.4f) * s, 0.0f, 100.0f);
+    echo_send = e * e * 0.0001f;
+    rev_send = r * r * 0.0001f;
+    pl_decay_t = 0.6f + 0.375f * z * 0.01f;            /* to 0.975: a long hall */
+    echo_fb = 0.5f + 0.32f * z * 0.01f;
+}
+
 static void apply(int p, int v)
 {
     const en_param_t *pi = &PARAMS[p];
@@ -1764,14 +1805,9 @@ static void apply(int p, int v)
         break;
     case P_GLIDE: glide_k = 1.0f / ((0.02f + 0.012f * (float)v) * EN_SR); break;   /* 20 ms .. 1.2 s */
     case P_DRIFT: cd.speed = drift_speed(v); break;
-    case P_ECHO: echo_send = (float)(v * v) * 0.0001f; break;
     case P_ETIME: echo_time(); break;
-    case P_REVERB: rev_send = (float)(v * v) * 0.0001f; break;
-    case P_SIZE:
-        pl_decay_t = 0.6f + 0.375f * (float)v * 0.01f;     /* to 0.975: a long hall */
-        echo_fb = 0.5f + 0.32f * (float)v * 0.01f;
-        break;
-    case P_BRIGHT: bright = (float)v; break;
+    case P_ECHO: case P_REVERB: case P_SIZE: case P_SPACE: space_set(); break;
+    case P_BRIGHT: case P_MOOD: mood_set(); break;
     case P_SWELL:
         swell = (float)v;
         swell_set();
@@ -2505,7 +2541,7 @@ static void conductor_step(void)                /* every CTRL_N samples */
     walk(&cd.bact, cd.wspeed);
     cd.dens =fm_clampf(cd.density.x + cd.s_density.x + fm_clampf(cd.trim * 0.05f, -0.4f, 0.0f), -1.0f, 1.0f);   /* the governor
                                                  * thins a loud garden; it no longer thickens a quiet one (Phase 5, TESTING #17) */
-    cd.br = fm_clampf(cd.bright.x + cd.s_bright.x, -0.6f, 0.6f);
+    cd.br = fm_clampf(cd.bright.x + cd.s_bright.x, -0.6f, 0.6f) + mood_br;   /* (Phase 6: around Mood's center) */
     reg_now = (int)(cd.reg.x + (cd.reg.x >= 0.0f ? 0.5f : -0.5f));
     walk(&tcur.sx, sp);                         /* the timbre cursor: its region with the seasons, its drift with the weather */
     walk(&tcur.sy, sp);
@@ -2521,7 +2557,7 @@ static void conductor_step(void)                /* every CTRL_N samples */
     walk(&fld.root, sp);
     fld.since += dt * sp;
     if (!fld.pend && fld.since > fld.dwell) {
-        const float dm = fld.mode.x + (bright - 50.0f) * 0.02f - (float)fld.shift, dr = fld.root.x - (float)fld.move;
+        const float dm = fld.mode.x + mode_tilt - (float)fld.shift, dr = fld.root.x - (float)fld.move;
         fld.pend = (int8_t)(dm > 0.75f ? 1 : dm < -0.75f ? -1 : dr > 0.75f ? 2 : dr < -0.75f ? -2 : 0);
     }
     echo_fb_eff = fm_clampf(echo_fb + 0.08f * cd.space.x - 0.05f * fm_clampf(-cd.trim * (1.0f / 6.0f), 0.0f, 1.0f), 0.3f, 0.9f);

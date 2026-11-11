@@ -1,0 +1,35 @@
+# an hour of the whole app (PROMPTS Phase 6: "a one-hour run"), at Drift fully up so the hour holds four hours of
+# weather: the screen every ten minutes (the field in the header, the tide and the weather on the right), the
+# output bounded, the garden still growing at the end, and nothing saved by itself while it plays
+wait 500
+spin K3 75
+expect par6 100
+peakreset
+wait 600000
+shot h10.png
+expect playing 1
+wait 600000
+shot h20.png
+wait 600000
+shot h30.png
+expect playing 1
+wait 600000
+shot h40.png
+wait 600000
+shot h50.png
+wait 599000
+shot h60.png
+expect playing 1
+expect sixteenths >10000
+expect loopnotes >0
+expect peak_db_max -0.5
+expect store_writes 0
+# the knobs still answer at the end of it
+spin K1 10
+expect par28 10
+tap REC
+wait 100
+expect frozen 1
+tap REC
+wait 100
+expect frozen 0

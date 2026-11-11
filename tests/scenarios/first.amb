@@ -24,7 +24,7 @@ wait 100
 shot bass.png
 tap SEQ
 wait 100
-shot pulse.png
+shot ground.png
 tap FX
 wait 100
 shot space.png

@@ -1,3 +1,23 @@
+# TIDE, from AMB-1, for the M-VAVE FM-1
+
+**TIDE** is a personal fork of Charles Vestal's AMB-1 (this tree, from v1.3.2: `UPSTREAM.md`) by Tomorrow's Man: the
+same sounds and platform under a conductor that changes the piece's tone, harmony and density over hours, and four
+knobs on its first page: **Mood, Density, Drift, Space**. What TIDE changes is described in `ARCHITECTURE.md`
+(sections 11 to 16); AMB-1's own text follows unchanged, and its links lead to AMB-1, not to TIDE. Every credit and
+licence below stands (`LICENSING.md`).
+
+| TIDE's pages | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
+|---|---|---|---|---|
+| Tide (HOME) | Mood | Density | Drift (fully down: Hold) | Space |
+| Pad (ENV) | Level | Swell | Bright | Colour |
+| Bells (ARP) | Amount | Tone | Octave | Evolve |
+| Bass (LFO) | Level | Octave | Glide | Fifth |
+| Ground (SEQ) | Level | Motion | Tempo | |
+| Space (FX) | Echo | Echo time | Reverb | Size |
+| Setup (GLO) | Root | Tune | MIDI out | Lights |
+
+---
+
 # AMB-1 for the M-VAVE FM-1
 
 AMB-1 turns the M-VAVE FM-1 into a generative ambient machine, inspired by Brian Eno's

@@ -14,7 +14,9 @@ const check = (ok, what) => { if (!ok) { console.log("FAIL", what); fails++; } }
 check(ex.app_npieces() === 8, "eight pieces");
 check(cstr(ex.app_piece_name(2)) === "Voices", "piece 2 is Voices");
 check(ex.app_piece_par(1, 18) === 60, "Departures' tempo 60");
-check(cstr(ex.app_param_text(6, 100)) === "5:00", "Drift's text");
+check(cstr(ex.app_param_text(6, 100)) === "4.00x", "Drift's text");   // TIDE: Drift is the weather's speed
+check(cstr(ex.app_param_text(6, 0)) === "Hold", "Drift fully down");
+check(cstr(ex.app_param_text(28, 20)) === "+20", "Mood's text");
 check(cstr(ex.app_chord_name(2, 2, 5, 9, 0)) === "Dm7", "a chord's name: " + cstr(ex.app_chord_name(2, 2, 5, 9, 0)));
 ex.app_init();
 for (let p = 0; p < ex.app_nparams(); p++) ex.app_set(p, ex.app_piece_par(0, p));

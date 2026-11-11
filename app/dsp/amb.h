@@ -60,6 +60,10 @@ enum {
     P_PADTONE,                                        /* the pad's colour, set by the piece: Rhodes, Voices */
     P_BASSOCT, P_GLIDE, P_FIFTH,                      /* bass: its octave, its glide, how often it leans on the fifth */
     P_SWING, P_HATS,                                  /* pulse: swing, the hats' colour */
+    P_MOOD, P_SPACE,                                  /* TIDE Phase 6, the main page's two new knobs, each an offset around
+                                                       * the piece's own values (0: the piece as its recipe has it). Mood:
+                                                       * dark .. bright, the pad's tone and the lean of the harmonic field.
+                                                       * Space: dry and near .. wet and far, the reverb, the echo, the decay */
     P_NPARAMS
 };
 typedef struct {

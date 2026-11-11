@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "id": "amb",
-  "name": "AMB-1",
+  "name": "TIDE",
   "author": "Charles Vestal",
   "license": "MPL-2.0",
   "tagline": "A generative ambient machine for the FM-1",

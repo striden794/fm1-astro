@@ -1,13 +1,14 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
-/* AMB-1 app: the project (everything that is saved), the app's entry points and its half of the contract with
+ * Copyright (C) 2026 Charles Vestal
+ * Copyright (C) 2026 Tomorrow's Man (TIDE) */
+/* TIDE (from AMB-1) app: the project (everything that is saved), the app's entry points and its half of the contract with
  * fm1-base (device/unity.c, host/plat_host.c). */
 #pragma once
 #include <stdint.h>
 #include "plat.h"
 #include "amb.h"
 
-#define APP_NAME "AMB-1"
+#define APP_NAME "TIDE"
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
 #ifdef APP_VERSION                       /* a release build passes its own (tools/build.py --release) */
 #define EN_VERSION APP_VERSION
@@ -15,13 +16,14 @@
 #define EN_VERSION "DEV"
 #endif
 
-/* the store: the project at 0xFC000 and the panel calibration at 0xDC000, where AMB-1 0.9 kept them (an update keeps
- * the pieces) */
+/* the store: TIDE's project in its own sector pair, 0xD8000 / 0xD9000 in the data area (Tomorrow's Man, TESTING #5), so AMB-1 and
+ * its descendants, which all keep theirs at 0xFC000, and TIDE never overwrite each other's pieces; the panel
+ * calibration at 0xDC000, where AMB-1 keeps it (it carries over) */
 enum { OBJ_PROJ, OBJ_PANEL, OBJ_NOBJ };
-#define APP_STORE_MAP {0xFC000u, 0xDC000u}
-#define PROJ_MAGIC 0x314F4E45u           /* "ENO1" */
-#define PROJ_FORMAT 4u                   /* 4: the bass's and the pulse's own settings (3 is carried over;
-                                          * older formats give the recipes) */
+#define APP_STORE_MAP {0xD8000u, 0xDC000u}
+#define PROJ_MAGIC 0x31444954u           /* "TID1" (AMB-1's is "ENO1": a record of its is not read) */
+#define PROJ_FORMAT 1u                   /* TIDE 1: AMB-1's format 4 and the main page's Mood and Space; another
+                                          * format gives the recipes */
 #define NPIECES EN_NPIECES
 
 typedef struct {

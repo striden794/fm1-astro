@@ -1,12 +1,14 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
+ * Copyright (C) 2026 Charles Vestal
+ * Copyright (C) 2026 Tomorrow's Man (TIDE) */
 /* AMB-1 in fm1-base's host simulator (host/plat_host.c, which includes app.c and so this): AMB-1's checks for
  * "expect", its command, a reboot and the screen reader's dump.
  *
  * AMB-1's checks: playing frozen view piece pool dirty sixteenths ext pad_level bass_level chordroot chordN loopnotes
- * parN battery (fm1-base's own: store_writes clocks_out midi_out peak_db_max peak_db_min). Its commands: storev3 N
- * (the project as AMB-1 0.9 before the layer pages wrote it, format 3, the playing piece's Pad at N); battery N (the
- * battery read as N, plat.h's plat_battery: -1..4; "battery off" the simulator's own, full). */
+ * parN battery field tide (fm1-base's own: store_writes clocks_out midi_out peak_db_max peak_db_min). TIDE's: field,
+ * the harmonic field's pitch classes (a 12-bit set, C = bit 0); tide, the ebb in tenths of a dB (0: in). Its commands:
+ * storeamb (a record as AMB-1 writes it, magic "ENO1", put where TIDE keeps its project: it must not be read);
+ * battery N (the battery read as N, plat.h's plat_battery: -1..4; "battery off" the simulator's own, full). */
 
 int app_expect(const char *what, int *got)
 {
@@ -29,6 +31,10 @@ int app_expect(const char *what, int *got)
         g = (int)en_bars;
     else if (!strcmp(what, "ext"))
         g = en_ext;
+    else if (!strcmp(what, "field"))
+        g = (int)en_cond[CD_FIELD_PCS];
+    else if (!strcmp(what, "tide"))
+        g = (int)(en_cond[CD_EBB] * 10.0f);
     else if (!strcmp(what, "pad_level"))
         g = (int)(en_pad_level * 100.0f);
     else if (!strcmp(what, "bass_level"))
@@ -58,24 +64,12 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
         batt_host = (int8_t)(strcmp(a, "off") ? atoi(a) : -2);
         return 1;
     }
-    if (!strcmp(cmd, "storev3")) {
-        static project_v3_t o;
-        int i, k;
-        memset(&o, 0, sizeof o);
-        o.magic = PROJ_MAGIC;
-        o.format = 3u;
-        for (k = 0; k < V3_NPARAMS; k++)
-            o.par[k] = proj.par[k];
-        o.par[P_PAD] = (int16_t)atoi(a);
-        o.pool = proj.pool;
-        o.leds = proj.leds;
-        o.piece = proj.piece;
-        for (i = 0; i < NPIECES; i++) {
-            for (k = 0; k < V3_NPARAMS; k++)
-                o.slot[i].par[k] = proj.slot[i].par[k];
-            o.slot[i].pool = proj.slot[i].pool;
-        }
-        o.slot[proj.piece].par[P_PAD] = o.par[P_PAD];
+    if (!strcmp(cmd, "storeamb")) {
+        static project_t o;
+        (void)a;
+        o = proj;
+        o.magic = 0x314F4E45u;                   /* "ENO1" */
+        o.format = 4u;
         plat_store_save(OBJ_PROJ, &o, sizeof o);
         return 1;
     }

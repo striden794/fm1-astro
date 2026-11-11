@@ -722,6 +722,56 @@ int main(void)
         CHECK(!bad, "NaN");
     }
 
+    /* TIDE Phase 6: the main page's Mood and Space (offsets around the piece's own knobs; at 0 a render is the same
+     * samples as before they existed: out/phase6's Garden take against Phase 5c's). The same garden (the generator
+     * starts from a constant) at Drift 100, 90 minutes each, Mood fully dark and fully bright: the bright one's
+     * weather is brighter (the conductor's brightness, which the pad's filter and index and the bells' tone follow)
+     * and its harmonic field leans to brighter modes. (The tone itself is measured on a held state by the render
+     * harness: two performances differ in their notes more than in their tone.) Then ten minutes with Space fully
+     * near and fully far: the far one's plate returns more. And both show their sign on the screen */
+    {
+        int m, s;
+        double br[2], shift[2], plate[2];
+        char t[10];
+        en_param_text(P_MOOD, 20, t);
+        CHECK(!strcmp(t, "+20"), "Mood text %s", t);
+        en_param_text(P_SPACE, -5, t);
+        CHECK(!strcmp(t, "-5"), "Space text %s", t);
+        CHECK(en_param_info(P_MOOD)->def == 0 && en_param_info(P_SPACE)->def == 0, "Mood and Space rest at 0");
+        for (m = 0; m < 2; m++) {
+            double b = 0.0, sh = 0.0;
+            en_init();
+            en_set(P_DRIFT, 100);
+            en_set(P_MOOD, m ? 50 : -50);
+            en_play(1);
+            for (s = 0; s < 5400; s++) {
+                run(1.0f);
+                b += (double)en_cond[CD_BRIGHT];
+                sh += (double)en_cond[CD_FIELD_SHIFT];
+            }
+            br[m] = b / 5400.0;
+            shift[m] = sh / 5400.0;
+        }
+        printf("  Mood, 90 min at Drift 100: dark, the weather's brightness %.2f on average, the field %.2f mode steps from home; "
+               "bright %.2f, %.2f\n", br[0], shift[0], br[1], shift[1]);
+        CHECK(br[1] > br[0] + 0.6, "Mood bright is no brighter: %.2f against %.2f", br[1], br[0]);
+        CHECK(shift[1] > shift[0] + 0.5, "Mood does not lean the field: %.2f against %.2f", shift[1], shift[0]);
+        for (m = 0; m < 2; m++) {
+            en_init();
+            en_set(P_SPACE, m ? 50 : -50);
+            en_play(1);
+            run(120.0f);
+            en_tap_reset();
+            run(480.0f);
+            /* against the dry layers: the two runs are two performances (the generator is not rewound) */
+            plate[m] = en_tap_plate / (en_tap_dry[EN_TAP_PAD] + en_tap_dry[EN_TAP_BELLS] + en_tap_dry[EN_TAP_BASS] +
+                                       en_tap_dry[EN_TAP_PULSE] + 1e-12);
+        }
+        printf("  Space, 8 min: the plate's return against the dry layers (energy): near %.3g, far %.3g\n", plate[0], plate[1]);
+        CHECK(plate[1] > 4.0 * plate[0], "Space far is no wetter: %.3g against %.3g", plate[1], plate[0]);
+        CHECK(!bad, "NaN");
+    }
+
     /* stop: the tails die away */
     for (i = 0; i < P_NPARAMS; i++)
         en_set(i, en_param_info(i)->def);

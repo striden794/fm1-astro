@@ -1,8 +1,9 @@
-# AMB-1's build settings (fm1-base's tools/build.py: ./build.sh)
+# TIDE's build settings, from AMB-1's (fm1-base's tools/build.py: ./build.sh). The files' stem and the package identity
+# are still AMB-1's: see ARCHITECTURE.md section 16 before changing them.
 name = "AMB"                   # the build's files: amb.fwsc, amb-X.Y.fwsc
 id_prefix = "FM-1_7"           # package identity: dev FM-1_700, releases FM-1_7XXYYZZ (as AMB-1 0.9)
-usb_manufacturer = "AMB-1"
-usb_product = "AMB-1 FM-1"
+usb_manufacturer = "TIDE"
+usb_product = "TIDE FM-1"
 ble = false                    # AMB-1 never uses the radio
 usb_audio_in = true            # the music recordable over USB
 usb_audio_out = false

@@ -749,3 +749,64 @@ lie on it, ±6 dB from note to note, so the remedy is that no single held voice 
   its ceiling (−3 dB less the tilt); three or more ebbs of 5 dB or more, none over 17, each back; at Hold an ebb
   does not move. All pass.
 - **CPU**: nothing per sample; a handful of operations per conductor step. Still unmeasured on the device.
+
+## 16. TIDE Phase 6: the controls, the screen, the save slot, the emulator (2026-11-10)
+
+**The pages** (`app/ui.c` `VIEW_KNOB`, `KNOB_LABEL`; buttons as AMB-1's):
+
+| Page (button) | K1 | K2 | K3 | K4 |
+|---|---|---|---|---|
+| **Tide** (HOME) | Mood | Density | Drift | Space |
+| Pad (ENV) | Level | Swell | Bright | Colour |
+| Bells (ARP) | Amount | Tone | Octave | Evolve |
+| Bass (LFO) | Level | Octave | Glide | Fifth |
+| Ground (SEQ) | Level | Motion | Tempo | (none) |
+| Space (FX) | Echo | Echo time | Reverb | Size |
+| Setup (GLO) | Root | Tune | MIDI out | Lights |
+
+The old Garden page's Tempo, Evolve and Motion moved to Ground and Bells; Density moved from Bells to the first page;
+the pulse's Hits, Swing and Hats are on no page (the pulse is not played). Keys, PLAY, REC, EDIT, SELECT, ALGORITHM,
+PRESETS, OCT−/OCT+, SAVE, HOME + SELECT (tempo) and the help cards are AMB-1's.
+
+**Mood and Space** (`P_MOOD`, `P_SPACE`, −50..+50, 0 in every recipe; `mood_set`, `space_set` in `app/dsp/amb.c`).
+Each is an offset around the piece's own knobs, so at 0 the engine computes exactly what it did before: the 8 h
+Garden take of seed 1107 is the same file as Phase 5c's, byte for byte (`out/phase6/batch.log`).
+- Mood: the pad's Bright ±30 points (`bright`), the mode walker's lean ±1.5 mode steps (`mode_tilt`, in the two places
+  that read Bright's tilt), and the center of the weather's brightness `cd.br` −0.40..+0.50 (`MOOD_BR_DOWN`,
+  `MOOD_BR_UP`): the pad's filter, vowel and index, the bells' tone and their octave-ups all read `cd.br`.
+- Space: toward near, Reverb and Echo −30 points and Size −20 (the plate's decay, the echo's feedback); toward far,
+  Echo +30 but Reverb only +15 and Size +10 (`SPACE_FAR_REV`, `SPACE_FAR_SIZE`). With the far side as long as the near
+  one (Garden's Reverb at 95, Size at 100) a held state rose 8.2 dB and one note rang in the plate within 3 dB of the
+  whole target for 3.8 of 5 minutes; now +2.9 dB and 0.3 minutes at Hold, where the governor's hands are stopped,
+  and inside every line when the piece runs (`out/phase6/`). The Space page's own knobs keep their values; the
+  offset is applied where the sends are computed.
+- Drift fully down is Hold (Phase 3); the screen says "hold" top right. The ebb has no knob (TESTING #32 had no
+  preference: the engine decides).
+
+**The screen** (`draw_header`, `draw_ring`, `draw_meters`, `draw_weather`, `draw_main`). The header's key is the
+harmonic field as it is now (`en_field_name`), not the home scale; the ring and the keys' lights show the field too
+(`field_abs`). Left: the four layers (the fourth is Ground). Right, in the pulse rings' place: the tide
+(`en_cond[CD_EBB]`, full = in, empty at 16 dB out), then two marks for the weather's brightness (`CD_BRIGHT`) and
+density (`en_arc`). Top left: the timbre cursor's nearest anchor (`en_anchor_name`). The screen reader says the field's
+scale, "holding", and "The tide is out".
+
+**The save slot** (`app/app.h`): `OBJ_PROJ` at 0xD8000 / 0xD9000, magic "TID1", format 1 (AMB-1's format 4 plus the two
+new values; 30 values a piece, 582 bytes). AMB-1 and its descendants keep theirs at 0xFC000, so neither overwrites the
+other; a record with AMB-1's magic in TIDE's slot is not read (`tests/scenarios/tide.amb`, `storeamb`). AMB-1's
+format-3 migration is gone. The panel calibration stays at 0xDC000 and carries over.
+
+**Tests.** `tests/host/amb_test.c`: Mood leans the weather and the field, Space the plate. `tests/scenarios/tide.amb`:
+every knob of the Tide, Bells and Ground pages, Hold, the help card, save and restore per piece, the recipe reset, the
+foreign record. `tests/scenarios/hour.amb`: an hour of the whole app at Drift 100 with a screenshot every ten minutes.
+`migrate.amb` (AMB-1's format 3) was removed. `ui.c`'s `accel` now honours the simulator's `spin` (it never did: a
+second spin within 60 ms of the first was accelerated).
+
+**Building here.** `. tools/env.sh` (from `fm1-ambient/`) sets the compiler shim, Emscripten 6.0.10 in
+`fm1-ambient/toolchains/emsdk` (installed in the project folder; the version AMB-1's release workflow pins) and the
+FriBidi path. Then in `tide/`: `python base/tools/build.py app --host` (the simulator), `python base/tools/build.py app
+--web` (the browser emulator: `app/build/emu/`, served with `python -m http.server`), `sh tests/run_tests.sh`.
+**Not built here:** the `.fwsc` package (the JieLi toolchain is Linux x86-64 only). `.github/workflows/release.yml`
+is AMB-1's and builds it on GitHub (`workflow_dispatch`, or a `v*` tag) once the tree is in a GitHub repository; the
+build's file stem is still `amb` (`app/fm1.toml` `name`), left alone until that build can be run, since the stem runs
+through the workflow, `tests/run_tests.sh` and the web scripts. The package identity (`id_prefix`, AMB-1's `FM-1_7`)
+is also AMB-1's still: choose TIDE's own before the first flash (Phase 7).

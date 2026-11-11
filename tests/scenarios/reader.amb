@@ -3,7 +3,7 @@
 wait 200
 listen
 wait 100
-said Garden page: Tempo 72, Evolve 35, Motion 50, Drift 0.50 times. Piece Garden, D Dorian, growing
+said Tide page: Mood 0, Density 40, Drift 0.50 times, Space 0. Piece Garden, D Dorian, tempo 72, growing
 # (the garden follows, queued: the chord, how far to the next, the scale from the root up)
 listen
 where
@@ -33,16 +33,16 @@ wait 300
 said Echo time 1/2.
 tap HOME
 wait 300
-said Garden page
-spin K4 20
+said Tide page
+spin K3 20
 wait 300
 said Drift 0.87 times
-# HOME + SELECT: the tempo (the Garden's first knob says it)
+# HOME + SELECT: the tempo
 press HOME
 turn SELECT 2 200
 release HOME
 wait 300
-said Tempo 74
+said TEMPO 74
 # the keys: a note out of the scale and back in; the root stays
 tapkey w1
 said REMOVED G
@@ -112,4 +112,4 @@ wait 1000
 said Tempo 74
 # WHERE: everything again
 where
-said Garden page: Tempo 74, Evolve 35, Motion 50, Drift 0.87 times. Piece Garden, D Dorian, resting
+said Tide page: Mood 0, Density 40, Drift 0.87 times, Space 0. Piece Garden, D Dorian, tempo 74, resting

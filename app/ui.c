@@ -1,40 +1,46 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 Charles Vestal */
-/* AMB-1 UI: the panel and the screen. Part of the unity build (after gfx.c and project.c); the host
+ * Copyright (C) 2026 Charles Vestal
+ * Copyright (C) 2026 Tomorrow's Man (TIDE: the pages, the status display) */
+/* TIDE's UI (from AMB-1's): the panel and the screen. Part of the unity build (after gfx.c and project.c); the host
  * simulator includes it too.
  *
- *   keys           the scale: each key adds or removes its note from the pool (the root stays)
- *   PLAY           the garden grows / rests        ARP   the next chord, now
+ *   KNOB 1-4       the page's four values. The first page, TIDE (HOME), is the instrument's four knobs (DESIGN
+ *                  section 9): MOOD dark .. bright, DENSITY, DRIFT (fully down: HOLD), SPACE near .. far. Each is a
+ *                  center the weather moves around, never a fixed value.
+ *   HOME ENV ARP LFO SEQ FX GLO   the pages: TIDE, PAD, BELLS, BASS, GROUND, SPACE, SETUP (SELECT steps through them)
+ *   keys           the home scale: each key adds or removes its note (the root stays). The harmonic field leaves
+ *                  home over the hours and the lights follow it; a key brings it home
+ *   PLAY           the garden grows / rests        EDIT  the next chord, on the bar
  *   REC            FREEZE: the chord holds, the reverb rings on    OCT- / OCT+   the bells' octave
- *   ENV            the pad's colour: Rhodes / Voices (lit: Voices), kept with the piece
- *   SELECT tempo   ALGORITHM mode (loads a pool)   PRESETS the piece (Root is on the Setup page)
- *   HOME SEQ FX SEL GLO   the pages: LAYERS, MOTION, SPACE, TONE, SETUP (EDIT steps through them)
- *   KNOB 1-4       the page's four values
+ *   ALGORITHM mode (loads a scale)   PRESETS the piece (the landscape)   HOME + SELECT the tempo
  *   SAVE           saves (it also saves by itself a few seconds after a change, while resting);
- *                  held 1.5 s: the piece back to its recipe */
+ *                  held 1.5 s: the piece back to its recipe
+ * The screen is a quiet status display, nothing that needs looking at: the piece and the harmonic field as it is now
+ * in the header; the scale and the chord as a ring, the bell loops around it; on the left the four layers' levels; on
+ * the right the tide (how far out the ebb is), and where the weather's brightness and density are. */
 #include "fastmath.h"
 
 /* the pages, one a layer (a button each); SELECT steps through them in this order */
 enum { V_GARDEN, V_PAD, V_BELLS, V_BASS, V_PULSE, V_SPACE, V_SETUP, NVIEWS };
-static const char *const VIEW_NAME[NVIEWS] = {"Garden", "Pad", "Bells", "Bass", "Pulse", "Space", "Setup"};
+static const char *const VIEW_NAME[NVIEWS] = {"Tide", "Pad", "Bells", "Bass", "Ground", "Space", "Setup"};
 static const uint8_t VIEW_BTN[NVIEWS] = {B_HOME, B_ENV, B_ARP, B_LFO, B_SEQ, B_FX, B_GLO};
 /* the four knobs of each page: a parameter, or one of these; and what the knob is called there */
 enum { K_LEDS = 100, K_CPU, K_NONE };
 static const uint8_t VIEW_KNOB[NVIEWS][4] = {
-    {P_TEMPO, P_EVOLVE, P_MOTION, P_DRIFT},
+    {P_MOOD, P_DENSITY, P_DRIFT, P_SPACE},        /* TIDE: the four knobs (DESIGN section 9) */
     {P_PAD, P_SWELL, P_BRIGHT, P_PADTONE},
-    {P_BELLS, P_DENSITY, P_BTONE, P_BOCT},
+    {P_BELLS, P_BTONE, P_BOCT, P_EVOLVE},         /* Amount (count and level), Tone, Octave (Tomorrow's Man, TESTING #28) */
     {P_BASS, P_BASSOCT, P_GLIDE, P_FIFTH},
-    {P_PULSE, P_HITS, P_SWING, P_HATS},
+    {P_PULSE, P_MOTION, P_TEMPO, K_NONE},         /* Ground's level (the pulse's slot); the old Garden page's two */
     {P_ECHO, P_ETIME, P_REVERB, P_SIZE},
     {P_ROOT, P_TUNE, P_MIDI, K_LEDS},
 };
 static const char *const KNOB_LABEL[NVIEWS][4] = {
-    {"Tempo", "Evolve", "Motion", "Drift"},
+    {"Mood", "Density", "Drift", "Space"},
     {"Level", "Swell", "Bright", "Colour"},
-    {"Level", "Density", "Tone", "Octave"},
+    {"Amount", "Tone", "Octave", "Evolve"},
     {"Level", "Octave", "Glide", "Fifth"},
-    {"Level", "Hits", "Swing", "Hats"},
+    {"Level", "Motion", "Tempo", ""},
     {"Echo", "Echo time", "Reverb", "Size"},
     {"Root", "Tune", "MIDI out", "Lights"},
 };
@@ -150,6 +156,12 @@ static uint32_t pool_abs(void)                 /* the pool as absolute pitch cla
     uint32_t p = proj.pool, r = (uint32_t)proj.par[P_ROOT];
     return ((p << r) | (p >> (12u - r))) & 0xFFFu;
 }
+/* the harmonic field as it is now, as absolute pitch classes (before the engine's first block: home) */
+static uint32_t field_abs(void)
+{
+    uint32_t p = en_field_pool, r = en_field_root % 12u;
+    return p ? ((p << r) | (p >> (12u - r))) & 0xFFFu : pool_abs();
+}
 static const char *mode_name(void)
 {
     return proj.pool == EN_MODE_POOL[proj.par[P_MODE]] ? EN_MODE_NAME[proj.par[P_MODE]] : "Custom";
@@ -230,6 +242,13 @@ static int32_t accel(int role, int32_t s, int range)
     ui.enc_t[role] = now;
     if (!a)
         return s;
+#ifdef PLAT_HOST
+    if (plat_host_exact) {                     /* TIDE: the simulator's "spin" (accel_off was never set from it, and a
+                                                * second spin a millisecond after the first was sped up) */
+        ui.enc_run[role] = 0;
+        return s;
+    }
+#endif
     if (a > 1)
         dt /= a;                                      /* per detent */
     ui.enc_run[role] = (uint8_t)(dt < 60u ? (ui.enc_run[role] + a > 255u ? 255u : ui.enc_run[role] + a) : a);
@@ -419,8 +438,8 @@ static void input(void)
         if (btn >> B_HOME & 1u) {
             turn(EN_SELECT, P_TEMPO, e);
             ui.btn_used |= 1u << B_HOME;
-            if (ui.view == V_GARDEN) {           /* Tempo is the Garden's first knob */
-                ui.touched = 0;
+            if (ui.view == V_PULSE) {            /* Tempo is the Ground page's third knob */
+                ui.touched = 2;
                 ui.touch_until = plat_ms() + 1200u;
             } else {
                 char t[8];
@@ -664,7 +683,7 @@ static void draw_header(void)
 {
     char t[24];
     int msg = plat_ms() < ui.msg_until;
-    uint32_t h = hash(hash(hash(2166136261u, proj.piece | (uint32_t)proj.par[P_ROOT] << 8 | (uint32_t)proj.pool << 12),
+    uint32_t h = hash(hash(hash(2166136261u, proj.piece | (uint32_t)en_field_root << 8 | (uint32_t)en_field_pool << 12),
                            en_playing | ui.dirty << 4 | (uint32_t)msg << 5 | (uint32_t)en_ext << 6 | (uint32_t)proj.par[P_MODE] << 8),
                       (uint32_t)proj.par[P_TEMPO] | (ui.view == V_SETUP ? plat_cpu_pct() << 8 : 0u) |
                       (uint32_t)(batt() + 1) << 24);
@@ -719,11 +738,20 @@ static void draw_header(void)
         w = text_w(&FONT_B, piece_name(proj.piece)) + 12;   /* the piece, in a coral tag */
         cv_round(4, 4, w, 20, 6, K_TEXT);
         cv_text(10, 6, &FONT_B, piece_name(proj.piece), K_BG);
-        w += 10;                                  /* the root, then the mode, where they clear the right side */
-        if (w + text_w(&FONT_XS, EN_NOTE_NAME[proj.par[P_ROOT]]) + 4 <= x) {
-            w = cv_text(w, 8, &FONT_XS, EN_NOTE_NAME[proj.par[P_ROOT]], K_TEXT);
-            if (w + 3 + text_w(&FONT_XS, mode_name()) + 4 <= x)
-                cv_text(w + 3, 8, &FONT_XS, mode_name(), K_DIM);
+        w += 10;                                  /* the harmonic field as it is now (it leaves home over the hours):
+                                                   * its root, then its mode, where they clear the right side */
+        {
+            char f[16], *m;
+            en_field_name(f);
+            for (m = f; *m && *m != ' '; m++)
+                ;
+            if (*m)
+                *m++ = 0;
+            if (w + text_w(&FONT_XS, f) + 4 <= x) {
+                w = cv_text(w, 8, &FONT_XS, f, K_TEXT);
+                if (w + 3 + text_w(&FONT_XS, m) + 4 <= x)
+                    cv_text(w + 3, 8, &FONT_XS, m, K_DIM);
+            }
         }
     }
     cv_blit(0, 0);
@@ -755,7 +783,7 @@ static const char *chord_now(char *nm)          /* the chord's name, as the gard
 
 static void draw_ring(void)
 {
-    uint32_t abs_pool = pool_abs(), chord = 0;
+    uint32_t abs_pool = field_abs(), chord = 0;
     int i, l;
     for (i = 0; i < EN_NPAD; i++)
         chord |= 1u << (en_chord[i] % 12u);
@@ -779,8 +807,8 @@ static void draw_ring(void)
         int32_t x, y;
         int in = (int)(abs_pool >> i & 1u), ch = (int)(chord >> i & 1u);
         polar(CX, CY, 24.0f, i, 12, &x, &y);
-        if (i == proj.par[P_ROOT])
-            cv_disc(x, y, 5, K_TEXT);           /* the root: ringed in ink */
+        if (i == (int)(en_field_pool ? en_field_root % 12u : (uint32_t)proj.par[P_ROOT]))
+            cv_disc(x, y, 5, K_TEXT);           /* the field's root: ringed in ink */
         if (ch)
             cv_disc(x, y, 4, mix(K_PAD_T, K_PAD, 6 + q16(en_pad_level) * 10 / 16));
         else if (in)
@@ -801,16 +829,14 @@ static void draw_ring(void)
 static void draw_meters(void)                    /* left: the four layers */
 {
     static const uint16_t C[4] = {K_PAD, K_BELL, K_BASS, K_PULSE}, T[4] = {K_PAD_T, K_BELL_T, K_BASS_T, K_PULSE_T};
-    float lv[4], bm = 0.0f, dm = 0.0f;
+    float lv[4], bm = 0.0f;
     int i;
     for (i = 0; i < EN_NLOOP; i++)
         bm = fm_maxf(bm, en_loop_glow[i]);
-    for (i = 0; i < EN_NDRUM; i++)
-        dm = fm_maxf(dm, en_drum_glow[i]);
     lv[0] = en_pad_level * (float)proj.par[P_PAD] * 0.01f;
     lv[1] = bm * (float)proj.par[P_BELLS] * 0.01f;
     lv[2] = en_bass_level * (float)proj.par[P_BASS] * 0.01f;
-    lv[3] = dm * (float)proj.par[P_PULSE] * 0.01f;
+    lv[3] = en_ground_level * (float)proj.par[P_PULSE] * 0.01f;   /* Ground, in the pulse's place */
     for (i = 0; i < 4; i++) {
         int32_t x = 10 + i * 11, h = (int32_t)(fm_clampf(lv[i], 0.0f, 1.0f) * 80.0f + 0.5f);
         cv_round(x, 46, 7, 86, 3, T[i]);
@@ -819,29 +845,22 @@ static void draw_meters(void)                    /* left: the four layers */
     }
 }
 
-static void draw_pulse(void)                     /* right: the three Euclidean rings */
+/* right: the weather, quietly. Three slim columns, as tall as the layers' on the left: the tide (full: in; it sinks
+ * as the garden ebbs, to the bottom at 16 dB out), then where the weather's brightness and its density are (a mark
+ * that moves over minutes, the middle being the knob's own place) */
+static int32_t tide_px(void) { return (int32_t)(fm_clampf(1.0f + en_cond[CD_EBB] * (1.0f / 16.0f), 0.0f, 1.0f) * 80.0f + 0.5f); }
+static int32_t bright_px(void) { return (int32_t)(fm_clampf(0.5f + en_cond[CD_BRIGHT] * (1.0f / 1.2f), 0.0f, 1.0f) * 79.0f + 0.5f); }
+static int32_t dens_px(void) { return (int32_t)(fm_clampf(0.5f + 0.5f * en_arc, 0.0f, 1.0f) * 79.0f + 0.5f); }
+static void draw_weather(void)
 {
-    int d;
-    for (d = 0; d < EN_NDRUM; d++) {
-        int32_t cx = 212, cy = 52 + d * 34, s, n = EN_DRUM_N[d];
-        int g = q16(en_drum_glow[d]);
-        uint32_t p = en_drum_pat[d];
-        for (s = 0; s < n; s++) {
-            int32_t x, y;
-            int cur = en_playing && s == en_drum_pos[d];
-            polar(cx, cy, 13.0f, s, n, &x, &y);
-            if ((p >> s & 1u) && en_pulse_rest)   /* sitting a few bars out: faded */
-                cv_disc(x, y, 2, K_LINE);
-            else if (p >> s & 1u)
-                cv_disc(x, y, cur ? 3 : 2, cur ? K_PULSE : mix(K_PULSE_T, K_PULSE, 10));
-            else if (cur)
-                cv_disc(x, y, 1, K_DIM);
-            else
-                cv_rect(x, y, 2, 2, K_LINE);
-        }
-        if (g)
-            cv_disc(cx, cy, 1 + g / 4, mix(K_BG, K_PULSE, g));
-    }
+    int32_t h = tide_px();
+    cv_round(201, 46, 7, 86, 3, K_FROST_T);
+    if (h > 0)
+        cv_round(201, 46 + 86 - h - 2, 7, h + 2, 3, K_FROST);
+    cv_round(212, 46, 7, 86, 3, K_LINE);
+    cv_round(212, 46 + 79 - bright_px(), 7, 7, 3, K_BASS);
+    cv_round(223, 46, 7, 86, 3, K_LINE);
+    cv_round(223, 46 + 79 - dens_px(), 7, 7, 3, K_PULSE);
 }
 
 /* a button's card (help_tick): its name, then what it does, in the garden's place. A line starting with a
@@ -854,11 +873,11 @@ static int help_lines(int b, const char *l[HELP_LINES])
     int n = 0;
 #define L(t) (l[n++] = (t))
     switch (b) {
-    case B_HOME: L("THE GARDEN"); L("TEMPO, EVOLVE, MOTION, DRIFT"); L("+ SELECT: TEMPO"); break;
+    case B_HOME: L("TIDE"); L("MOOD, DENSITY, DRIFT, SPACE"); L("DRIFT FULLY DOWN: HOLD"); L("+ SELECT: TEMPO"); break;
     case B_ENV: L("THE PAD"); L("LEVEL, SWELL, BRIGHT,"); L("COLOUR"); break;
-    case B_ARP: L("THE BELLS"); L("LEVEL, DENSITY, TONE,"); L("OCTAVE"); break;
+    case B_ARP: L("THE BELLS"); L("AMOUNT, TONE, OCTAVE,"); L("EVOLVE"); break;
     case B_LFO: L("THE BASS"); L("LEVEL, OCTAVE, GLIDE, FIFTH"); break;
-    case B_SEQ: L("THE PULSE"); L("LEVEL, HITS, SWING, HATS"); break;
+    case B_SEQ: L("THE GROUND"); L("LEVEL, MOTION, TEMPO"); break;
     case B_FX: L("THE SPACE"); L("ECHO, ECHO TIME, REVERB,"); L("SIZE"); break;
     case B_GLO: L("SETUP"); L("ROOT, TUNE, MIDI OUT, LIGHTS"); break;
     case B_EDIT: L("THE NEXT CHORD,"); L("ON THE NEXT BAR"); break;
@@ -886,7 +905,7 @@ static void draw_help(void)
 
 static void draw_main(void)
 {
-    uint32_t h = hash(2166136261u, pool_abs() | (uint32_t)proj.par[P_ROOT] << 12 | (uint32_t)en_frozen << 16 | proj.piece << 24 |
+    uint32_t h = hash(2166136261u, field_abs() | (uint32_t)en_field_root << 12 | (uint32_t)en_frozen << 16 | proj.piece << 24 |
                                         (uint32_t)en_playing << 17 | (uint32_t)proj.par[P_MODE] << 20), i;
     if (ui.frame % 3u)                           /* the garden moves slowly: 20 frames a second is plenty */
         return;
@@ -908,17 +927,21 @@ static void draw_main(void)
         for (s = 0; s < EN_LOOP_LEN[i]; s++)
             h = hash(h, (uint32_t)(en_loop_note[i][s] >= 0));
     }
-    for (i = 0; i < EN_NDRUM; i++)
-        h = hash(h, en_drum_pos[i] | (uint32_t)q16(en_drum_glow[i]) << 8 | en_drum_pat[i] << 13 | (uint32_t)en_pulse_rest << 31);
-    h = hash(h, (uint32_t)(en_drift * 40.0f) | (uint32_t)q16(en_pad_level) << 8 | (uint32_t)q16(en_bass_level) << 13);
+    h = hash(h, (uint32_t)tide_px() | (uint32_t)bright_px() << 8 | (uint32_t)dens_px() << 16 | (uint32_t)en_cond[CD_ANCHOR] << 24 |
+                    (uint32_t)(proj.par[P_DRIFT] <= 0) << 31);
+    h = hash(h, (uint32_t)(en_drift * 40.0f) | (uint32_t)q16(en_pad_level) << 8 | (uint32_t)q16(en_bass_level) << 13 |
+                    (uint32_t)q16(en_ground_level) << 18);
     for (i = 0; i < 4; i++)
         h = hash(h, (uint32_t)proj.par[i]);
     if (h == ui.sig[1])
         return;
     ui.sig[1] = h;
     cv_begin(240, MAIN_H, K_BG);
+    cv_text(10, 4, &FONT_XS, en_anchor_name(), K_DIM);   /* top left: the timbre nearest to where the tone is now */
     if (en_frozen) {                             /* the way to the next chord, top right (held: frozen) */
         cv_text(232 - text_w(&FONT_XS, "held"), 4, &FONT_XS, "held", K_FROST);
+    } else if (proj.par[P_DRIFT] <= 0) {         /* Drift fully down: everything holds where it is */
+        cv_text(232 - text_w(&FONT_XS, "hold"), 4, &FONT_XS, "hold", K_ACC);
     } else {
         int32_t w = 30, f = (int32_t)(en_drift * (float)w + 0.5f);
         cv_round(232 - w, 8, w, 6, 3, K_LINE);
@@ -927,7 +950,7 @@ static void draw_main(void)
     }
     draw_ring();
     draw_meters();
-    draw_pulse();
+    draw_weather();
     cv_blit(0, MAIN_Y);
 }
 
@@ -987,7 +1010,7 @@ static void draw_knobs(void)
 
 static void leds(void)
 {
-    uint32_t b = 0, k = 0, i, ap = pool_abs();
+    uint32_t b = 0, k = 0, i, ap = field_abs();   /* the keys' lights follow the field */
     b |= 1u << VIEW_BTN[ui.view];
     if (en_playing)
         b |= 1u << B_PLAY;
@@ -1113,6 +1136,8 @@ static void sp_page(int all)
     sp_cat(VIEW_NAME[ui.view]);
     sp_cat(" page");
     for (i = 0; i < 4; i++) {
+        if (VIEW_KNOB[ui.view][i] == K_NONE)
+            continue;
         sp_cat(i ? ", " : ": ");
         sp_knob(ui.view, i);
     }
@@ -1126,7 +1151,7 @@ static void sp_page(int all)
     sp_cat(mode_name());
     if (en_ext) {
         sp_cat(", tempo EXT");
-    } else if (ui.view != V_GARDEN) {          /* (the Garden's first knob says it) */
+    } else if (ui.view != V_PULSE) {           /* (the Ground page's third knob says it) */
         sp_cat(", tempo ");
         sp_int((uint32_t)proj.par[P_TEMPO]);
     }
@@ -1144,18 +1169,20 @@ static void sp_page(int all)
     }
 }
 
-/* the garden: the chord and how far to the next, the scale from the root up ("F and F sharp": one letter's
- * two notes joined, so they are heard as two), the pulse sitting out */
+/* the garden: the chord and how far to the next, the harmonic field as it is now (its scale from its root up; "F
+ * and F sharp": one letter's two notes joined, so they are heard as two), the tide when it is out */
 static void sp_garden(void)
 {
-    uint32_t ap = pool_abs();
-    int i, last = -1;
+    uint32_t ap = field_abs();
+    int i, last = -1, root = en_field_pool ? (int)(en_field_root % 12u) : proj.par[P_ROOT];
     sp_n = 0;
     sp_buf[0] = 0;
     sp_cat("Chord ");
     sp_chord();
     if (en_frozen) {
         sp_cat(", frozen");
+    } else if (proj.par[P_DRIFT] <= 0) {
+        sp_cat(", holding");
     } else {
         sp_cat(", next chord ");
         sp_int((uint32_t)(fm_clampf(en_drift, 0.0f, 1.0f) * 100.0f + 0.5f));
@@ -1163,15 +1190,15 @@ static void sp_garden(void)
     }
     sp_cat(". Scale");
     for (i = 0; i < 12; i++) {
-        int pc = (proj.par[P_ROOT] + i) % 12;
+        int pc = (root + i) % 12;
         if (ap >> pc & 1u) {
             sp_cat(last < 0 ? " " : EN_NOTE_NAME[last][0] == EN_NOTE_NAME[pc][0] ? " and " : ", ");
             sp_cat(EN_NOTE_NAME[pc]);
             last = pc;
         }
     }
-    if (en_pulse_rest && proj.par[P_PULSE])
-        sp_cat(". Pulse resting");
+    if (en_cond[CD_EBB] < -3.0f)
+        sp_cat(". The tide is out");
 }
 
 /* a help card: its button, then its lines ("ENV button. THE PAD. LEVEL, SWELL, BRIGHT, COLOUR") */
@@ -1342,6 +1369,8 @@ static void speak_dump(void)
         sp_print("SCREEN", sp_buf);
         for (i = 0; i < 4; i++) {
             int k = VIEW_KNOB[v][i];
+            if (k == K_NONE)
+                continue;
             knob_range(k, &lo, &hi);
             for (x = lo; x <= hi; x++) {
                 if (k < P_NPARAMS)
