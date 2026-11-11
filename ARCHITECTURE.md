@@ -810,3 +810,21 @@ is AMB-1's and builds it on GitHub (`workflow_dispatch`, or a `v*` tag) once the
 build's file stem is still `amb` (`app/fm1.toml` `name`), left alone until that build can be run, since the stem runs
 through the workflow, `tests/run_tests.sh` and the web scripts. The package identity (`id_prefix`, AMB-1's `FM-1_7`)
 is also AMB-1's still: choose TIDE's own before the first flash (Phase 7).
+
+## 17. SAMSARA Phase 6c: the wheel (2026-11-11)
+
+Tomorrow's Man, on what should be in the middle of the screen (TESTING #37): "perhaps a rendition of the Wheel of Samsara".
+`app/ui.c`, `draw_wheel` (called first in `draw_ring`): eight gold spokes and a hub with an eye, inside the ring of
+twelve notes, which is the wheel's rim (a thin gold circle under the note discs, radius `WH_RIM` 24; the notes are
+its jewels). The drawing is our own, from the traditional eight-spoked form: a spoke is widest two thirds of the way
+out and comes to a point at the rim (`wh_spoke`).
+
+- **It turns with the harmony:** its angle is `en_drift` (the way to the next chord, 0..1) times one spoke's step
+  (45 degrees), clockwise. Eight spokes alike, so the next chord carries on from where the last ended. At Hold and on
+  a frozen chord `en_drift` stands, and so does the wheel.
+- **Its gold sinks with the tide:** `mix(K_BELL_T, K_ACC, 5 + 11 * tide_px() / 80)`.
+- **The chord's name** moved from the middle (the hub's place) to the top line of the garden, between the timbre
+  anchor and the way to the next chord, in `FONT_S`.
+- **Cost:** 53 by 53 pixels, one square root each and no arctangent (the pixel is turned into the wheel's frame and
+  folded into one wedge), on each redraw of the garden (at most 20 a second, and only when something on it changed;
+  `en_drift` was already in the redraw's signature in 40 steps a chord). Unmeasured on the device: Phase 7's CPU check.

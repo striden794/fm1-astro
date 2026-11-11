@@ -783,12 +783,58 @@ static const char *chord_now(char *nm)          /* the chord's name, as the gard
     return en_chord_name(pcs, EN_NPAD + 1, nm);
 }
 
+/* SAMSARA: the wheel (Tomorrow's Man, TESTING #37: "a rendition of the Wheel of Samsara"). Eight spokes and a hub inside the
+ * ring of twelve, which is its rim: the notes are the rim's jewels. It turns one spoke's step a chord (turn: the way
+ * to the next chord, 0..1), so it stands still at Hold and on a frozen chord, and with eight spokes alike a new
+ * chord carries on where the last one ended. No arctangent: a pixel is turned into the wheel's frame and folded
+ * into the wedge between one spoke and the next, where it is near one of two axes. One square root a pixel. */
+static int32_t tide_px(void);
+#define WH_RIM 24.0f                            /* the ring of twelve's radius */
+#define WH_HUB 6.5f
+static float wh_spoke(float al, float ac)       /* along a spoke's axis from the middle, and across it: coverage 0..1 */
+{
+    const float base = WH_HUB - 1.5f, tip = WH_RIM - 0.5f, belly = 0.64f;   /* widest two thirds of the way out */
+    float t = (al - base) / (tip - base), w;
+    if (t <= 0.0f || t >= 1.0f)
+        return 0.0f;
+    w = t < belly ? 0.8f + 2.0f * (t / belly) : 2.8f * (1.0f - t) / (1.0f - belly);
+    return fm_clampf(w - ac + 0.5f, 0.0f, 1.0f);
+}
+
+static void draw_wheel(float turn, uint16_t c)
+{
+    float a = turn * (FM_TWO_PI / 8.0f), cs = fm_cosf(a), sn = fm_sinf(a);
+    int32_t x, y, R = (int32_t)WH_RIM + 2;
+    for (y = -R; y <= R; y++)
+        for (x = -R; x <= R; x++) {
+            float fx = (float)x, fy = (float)y, d2 = fx * fx + fy * fy, d, u, v, cov, k;
+            if (d2 > (WH_RIM + 2.0f) * (WH_RIM + 2.0f))
+                continue;
+            d = fm_sqrtf(d2);
+            u = fm_fabsf(fx * cs + fy * sn);
+            v = fm_fabsf(fy * cs - fx * sn);
+            if (v > u) {
+                k = u;
+                u = v;
+                v = k;
+            }
+            cov = wh_spoke(u, v);                                                   /* the spoke on the wedge's near side */
+            k = wh_spoke((u + v) * 0.70710678f, (u - v) * 0.70710678f);             /* and the one 45 degrees on */
+            cov = fm_maxf(cov, k);
+            cov = fm_maxf(cov, fm_clampf(WH_HUB + 0.5f - d, 0.0f, 1.0f));           /* the hub */
+            cov *= fm_clampf(d - 2.5f + 0.5f, 0.0f, 1.0f);                          /* its eye */
+            cov = fm_maxf(cov, 0.75f * fm_clampf(1.2f - fm_fabsf(d - WH_RIM), 0.0f, 1.0f));   /* the rim, under the notes */
+            px_blend(CX + x, CY + y, c, (uint32_t)(cov * 16.0f + 0.5f));
+        }
+}
+
 static void draw_ring(void)
 {
     uint32_t abs_pool = field_abs(), chord = 0;
     int i, l;
     for (i = 0; i < EN_NPAD; i++)
         chord |= 1u << (en_chord[i] % 12u);
+    draw_wheel(en_drift, mix(K_BELL_T, K_ACC, 5 + 11 * tide_px() / 80));   /* its gold sinks with the tide */
     for (l = 0; l < EN_NLOOP; l++) {
         int len = EN_LOOP_LEN[l], s, pos = en_loop_pos[l], g = q16(en_loop_glow[l]);
         for (s = 0; s < len; s++) {
@@ -808,7 +854,7 @@ static void draw_ring(void)
     for (i = 0; i < 12; i++) {                  /* the scale: C at the top */
         int32_t x, y;
         int in = (int)(abs_pool >> i & 1u), ch = (int)(chord >> i & 1u);
-        polar(CX, CY, 24.0f, i, 12, &x, &y);
+        polar(CX, CY, WH_RIM, i, 12, &x, &y);
         if (i == (int)(en_field_pool ? en_field_root % 12u : (uint32_t)proj.par[P_ROOT]))
             cv_disc(x, y, 5, K_TEXT);           /* the field's root: ringed in ink */
         if (ch)
@@ -818,13 +864,10 @@ static void draw_ring(void)
         else
             cv_disc(x, y, 1, K_LINE);
     }
-    {   /* the chord's name, in the middle */
+    {   /* the chord's name, over the wheel (AMB-1 and TIDE had it in the middle, where the hub is now) */
         char nm[16];
         chord_now(nm);
-        if (text_w(&FONT_B, nm) <= 38)
-            text_c(CX, CY - 8, &FONT_B, nm, en_frozen ? K_FROST : K_TEXT);
-        else
-            text_c(CX, CY - 6, &FONT_XS, nm, en_frozen ? K_FROST : K_TEXT);
+        text_c(CX, 3, &FONT_S, nm, en_frozen ? K_FROST : K_TEXT);
     }
 }
 
