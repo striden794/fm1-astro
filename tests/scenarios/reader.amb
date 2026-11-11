@@ -60,7 +60,7 @@ said MODE Phrygian
 turn ALGO -1
 said MODE Dorian
 turn PRESET 1
-said PIECE Maranasati, F Aeolian, tempo 56
+said PIECE Maranasati, Bb Mixolyd., tempo 70
 wait 300
 unsaid Level
 turn PRESET -1

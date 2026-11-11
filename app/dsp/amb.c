@@ -66,10 +66,12 @@ static const struct {
     int8_t v[P_NPARAMS];
 } PIECES[EN_NPIECES] = {
     /* SAMSARA's four (Tomorrow's Man's names, 2026-11-10), each from one of AMB-1's eight recipes as a starting point:
-     * Samsara is Garden's row unchanged (the piece every phase was tuned and judged on); Maranasati is Voices'
-     * with the Ground let in; Anatta is Afternoon's; Nirvana is Shoreline's. */
+     * Samsara is Garden's row unchanged (the piece every phase was tuned and judged on); Maranasati is Tides'
+     * (Phase 6c, 2026-11-11: of AMB-1's four unused recipes the one that measured most balanced and moving in this
+     * engine, out/phase6c/compare.md; it was Voices' with the Ground let in); Anatta is Afternoon's; Nirvana is
+     * Shoreline's. */
     {"Samsara",      {60, 65, 45, 40, 40, 35, 25, 35, 45, 3, 65, 80, 40, 60, 50, 50, 0, 1, 72, 2, 1, 0, 0, 0, 20, 35, 0, 50}},
-    {"Maranasati",   {85, 0, 25, 30, 30, 30, 50, 0, 20, 5, 80, 90, 67, 70, 30, 55, 0, 1, 56, 5, 5, 0, 1, -1, 45, 30, 0, 40}},
+    {"Maranasati",   {55, 60, 40, 35, 45, 75, 10, 40, 50, 3, 65, 85, 60, 60, 55, 95, 0, 1, 70, 10, 4, 0, 1, 0, 25, 55, 10, 50}},
     {"Anatta",       {50, 65, 35, 25, 55, 45, 20, 30, 50, 2, 60, 75, 60, 50, 60, 55, 0, 1, 84, 7, 3, 0, 0, 0, 15, 40, 15, 65}},
     {"Nirvana",      {40, 60, 30, 0, 30, 40, 40, 0, 85, 4, 55, 95, 30, 80, 0, 85, 0, 1, 64, 4, 6, 0, 0, 0, 40, 20, 0, 30}},
 };

@@ -6,14 +6,14 @@ expect piece 0
 tap ENV
 spin K1 -10
 expect par0 50
-# the next piece: Maranasati, its recipe (tempo 56, the Ground at 30, no bells, F Aeolian)
+# the next piece: Maranasati, its recipe (tempo 70, the Ground at 35, bells 60, Bb Mixolydian)
 turn PRESET 1
 expect piece 1
-expect par18 56
-expect par3 30
-expect par1 0
-expect par19 5
-expect pool 0x5AD
+expect par18 70
+expect par3 35
+expect par1 60
+expect par19 10
+expect pool 0x6B5
 wait 20000
 shot maranasati.png
 expect pad_level >10
