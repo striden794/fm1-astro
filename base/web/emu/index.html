@@ -588,8 +588,15 @@ async function switchOn() {
     appPart = await import("./app.js").catch(() => null);
     if (appPart && appPart.attach) appPart.attach({ node, ac, status: (t) => showAlert(t) });
     node.port.postMessage({ type: "load", wasm, store: loadStore(), master }, [wasm]);
-    await ready;
-    await ac.resume();
+    // TIDE: nothing here waits for ever. A step that does not answer says which one it was.
+    const within = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(what)), ms))]);
+    await within(ready, 10000, "the engine did not answer (the browser loaded the page but not its audio program)");
+    await within(ac.resume(), 5000, `the browser would not start its audio (it says "${ac.state}"); check that Windows has a working output device and that this tab is allowed to play sound`);
+    // The screen is drawn from the audio clock: if the output device is not pulling sound, it stays dark.
+    setTimeout(() => {
+      if (!window.emuLast) showAlert(`Switched on, but no sound is leaving the browser (its audio is "${ac.state}"), so the screen stays dark. The browser plays to the Windows default output: check that it is a device that is connected and working, then reload this page.`);
+    }, 3000);
+    ac.onstatechange = () => { if (ac.state !== "running") showAlert(`The browser has stopped its audio (it says "${ac.state}").`); };
     $("start").hidden = true;
     controls.inert = false;
     status.textContent = ac.sampleRate === 44100 ? "On." : `On (the browser runs audio at ${ac.sampleRate} Hz).`;
