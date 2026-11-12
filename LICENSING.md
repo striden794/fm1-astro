@@ -1,3 +1,16 @@
+# SAMSARA licensing
+
+SAMSARA (built as TIDE) is a fork of AMB-1 1.3.2 by Tomorrow's Man, under the same licence, the **Mozilla Public
+License 2.0**, file by file. The files SAMSARA changed carry its copyright line beside AMB-1's (`app/app.h`,
+`app/host.c`, `app/dsp/amb.c`, `app/dsp/amb.h`, `app/ui.c`, `app/project.c`, the tests and tools it touched); the
+files it added (`tools/render.c`, `.github/workflows/dev.yml`, the scenarios of its own) are its own, MPL-2.0 too.
+fm1-base and felucca-bsp are in this tree as plain folders (`base/`, `base/bsp/`), unchanged but for what
+`git log -- base` shows; their commits are in `UPSTREAM.md`. The Wheel of Samsara on the screen is drawn in code
+(`app/ui.c`, `draw_wheel`) from the traditional eight-spoked form; no picture was copied. Everything below is
+AMB-1's own text and stands as it is.
+
+---
+
 # AMB-1 licensing
 
 AMB-1 is free software under the **Mozilla Public License 2.0** (`MPL-2.0`, full text in `LICENSE`), file by file.

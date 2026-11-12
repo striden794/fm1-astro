@@ -1,0 +1,34 @@
+# SAMSARA's guard (the kit's rule 6; amb.h en_load): the audio load read by the app sheds voices in three steps before
+# the sound can break up, and gives them back after calm. The simulator's load is 0 unless set here ("load N").
+# The Setup page shows the load, its peak since switching on, and THIN while the guard sheds.
+wait 500
+tap GLO
+wait 300
+expect shed 0
+expect cpu_peak 0
+load 41
+wait 300
+expect shed 0
+expect cpu_peak 41
+shot calm.png
+# between the two lines (50 and 62): nothing moves
+load 55
+wait 2000
+expect shed 0
+# at the upper line: a step every 0.4 s, three in all
+load 62
+wait 2000
+expect shed 3
+expect cpu_peak 62
+shot thin.png
+# half a minute on, the pad sings one voice at most
+wait 30000
+expect pad_voices <2
+# calm: a step back every 20 s
+load 30
+wait 15000
+expect shed 3
+wait 50000
+expect shed 0
+wait 300
+shot calm_again.png

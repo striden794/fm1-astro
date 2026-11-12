@@ -1259,12 +1259,47 @@ static void loop_pass(int l)                    /* the end of a pass: grow, prun
 static const float LOOP_IDX[EN_NLOOP] = {1.0f, 0.55f, 1.5f, 0.8f}, LOOP_DEC[EN_NLOOP] = {1.0f, 1.35f, 0.75f, 1.6f};
 static const int8_t LOOP_RAT[EN_NLOOP] = {0, 0, 1, -1};
 
+/* the guard (amb.h): what is shed at each step */
+volatile uint8_t en_shed;
+static volatile uint8_t shed_hit;
+static uint32_t shed_up_ms, shed_calm_ms;
+static uint8_t shed_begun;
+static const uint8_t SHED_NBELL[4] = {NBELL, 4, 3, 2}, SHED_NPAD[4] = {EN_NPAD, EN_NPAD, 2, 1};
+static const float SHED_FALL[4] = {0.0f, 0.0f, 1.0f, 6.0f};   /* dB/s: a pad voice sent out by the guard leaves at the
+                                                               * swell limit, and in seven seconds at the last step */
+void en_overload(void) { shed_hit = 1; }
+void en_load(uint32_t pct, uint32_t ms)
+{
+    if (!shed_begun) {
+        shed_begun = 1;
+        shed_up_ms = ms - 400u;
+        shed_calm_ms = ms;
+    }
+    if (shed_hit) {
+        shed_hit = 0;
+        pct = 100u;
+    }
+    if (pct >= EN_SHED_UP) {
+        shed_calm_ms = ms;
+        if (en_shed < 3u && ms - shed_up_ms >= 400u) {
+            en_shed++;
+            shed_up_ms = ms;
+        }
+    } else if (pct > EN_SHED_DOWN) {
+        shed_calm_ms = ms;                      /* between the two: it stays where it is */
+    } else if (en_shed && ms - shed_calm_ms >= 20000u) {
+        en_shed--;
+        shed_calm_ms = ms;
+    }
+}
+
 static void bell_voice(int l, int n, float vel, int32_t wait)
 {
     int i, best = 0, ri;
+    const int nb = SHED_NBELL[en_shed & 3u];
     float lo = 9.0f, t60, p, tone;
     bell_t *v;
-    for (i = 0; i < NBELL; i++) {               /* a free voice, or the quietest */
+    for (i = 0; i < nb; i++) {                  /* a free voice, or the quietest (the guard: of fewer) */
         float a = bell[i].on ? bell[i].amp : -1.0f;
         if (a < lo) {
             lo = a;
@@ -2224,6 +2259,7 @@ static void governor_step(float dt)
 static void pad_step(float dt)
 {
     int i, n_on, want_n, relay = 0;
+    const unsigned shed = en_shed & 3u;
     float want, top = -99.0f;
     cd.since_entry += dt;
     /* how many voices: the pad's presence, the density, the Density knob, the governor */
@@ -2271,6 +2307,8 @@ static void pad_step(float dt)
         want_n = 0;
     if (!en_playing || cd.speed <= 0.0f)
         want_n = pad_count();                   /* resting, or Hold: no entrances, no leaves */
+    if (want_n > SHED_NPAD[shed])
+        want_n = SHED_NPAD[shed];               /* the guard: fewer voices, Hold or not */
     cd.pad_target = want_n;
     for (i = 0; i < EN_NPAD; i++)
         if (pad[i].st != PV_OFF && pad[i].ldb > top)
@@ -2311,7 +2349,7 @@ static void pad_step(float dt)
          * hundredth of the pad's energy there, so the pad's level does not move with it, and the minute and a half an
          * entrance from -52 dB took before it could be heard is a quarter of that) */
         v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f || (v->st == PV_ON && v->ldb < top - 20.0f) ? 2.0f : v->rise,
-                      v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : v->fall, dt);
+                      v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : fm_maxf(v->fall, SHED_FALL[shed]), dt);
         v->crest = fm_clampf((v->ldb - v->tilt - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
         if (v->st == PV_OUT && v->ldb <= -50.0f) {
             v->st = PV_OFF;
@@ -2324,7 +2362,7 @@ static void pad_step(float dt)
         v->lin = v->st == PV_OFF ? 0.0f : fm_db2lin(v->ldb);
     }
     n_on = pad_count();
-    if (relay && want_n < 2)
+    if (relay && want_n < 2 && SHED_NPAD[shed] >= 2)
         want_n = 2;                             /* the hand-over: the successor is asked for, the old voice kept */
     if (n_on > want_n) {                        /* one too many: the one nearest the end of its stay leaves */
         int best = -1;
@@ -3147,6 +3185,8 @@ static void render_bells(uint32_t n)
         uint32_t j = 0;
         if (!v->on)
             continue;
+        if (i >= SHED_NBELL[en_shed & 3u])      /* the guard: a bell over the count dies away in a quarter second */
+            v->adec = fm_minf(v->adec, 0.999374f);
         if (v->wait > 0) {
             if ((uint32_t)v->wait >= n) {
                 v->wait -= (int32_t)n;

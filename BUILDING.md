@@ -1,3 +1,29 @@
+# Building SAMSARA
+
+SAMSARA builds as AMB-1 does; AMB-1's notes follow unchanged, and where they say `amb` (the files' stem) read
+`samsara`: `app/build/samsara.fwsc`, `samsara_host`, `samsara-X.Y.fwsc`; the package identity is `FM-1_108XXYYZZ`.
+What differs:
+
+- **No submodules.** fm1-base and felucca-bsp are plain folders here (`base/`, `base/bsp/`; `UPSTREAM.md`). A plain
+  `git clone` is the whole tree.
+- **Windows.** The simulator, the browser emulator, the tests and the desktop render build on Windows with tools kept
+  inside the project (`ARCHITECTURE.md` section 8 and 16). The firmware package does not: JieLi's toolchain is Linux
+  only.
+- **The package from GitHub, without a release.** `.github/workflows/dev.yml` builds `samsara.fwsc` on GitHub's
+  Linux machines when asked, and runs the tests there: `gh workflow run dev.yml`, then `gh run watch` and
+  `gh run download --name packages`. It signs nothing and publishes nothing, so it also works in a private
+  repository. A release is still AMB-1's way (below, "Publishing a release"): a tag, the shared builder, signed
+  provenance; that needs a public repository.
+- **The site.** `tools/make_pages.py`, `tools/publish_pages.sh` and `web/app/` are AMB-1's and still make AMB-1's
+  site and web app; SAMSARA has no site of its own yet.
+- **The manual's pictures:** `app/build/host/samsara_host docs/img/shots.amb app/build/shots`, copy the PNGs to
+  `docs/img/`, then `python tools/gen_manual_figures.py` for the panel drawing.
+- **The guard.** The Setup page shows the audio load and its peak since switching on; over 62 % the engine sheds
+  voices (`app/dsp/amb.h`, `en_load`). In the simulator, `load N` in a script stands in for the load
+  (`tests/scenarios/guard.amb`).
+
+---
+
 # Building AMB-1
 
 AMB-1 is an app on [fm1-base](https://github.com/charlesvestal/fm1-base) (`base/`, a git submodule, with

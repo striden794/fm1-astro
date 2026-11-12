@@ -772,6 +772,46 @@ int main(void)
         CHECK(!bad, "NaN");
     }
 
+    /* SAMSARA Phase 7: the guard (amb.h en_load). A load between the two lines moves nothing; at or over the upper one
+     * it sheds a step every 0.4 s, to three; the pad then sings one voice at most within half a minute (a full garden
+     * before it: Density 100); an overrun's flag is a step; 20 s of calm give a step back, a minute all three */
+    {
+        uint32_t ms = 1000u;
+        int k, before;
+        en_init();
+        en_set(P_DENSITY, 100);
+        en_set(P_DRIFT, 100);
+        en_play(1);
+        run(120.0f);
+        for (k = 0; k < 120 && (int)en_cond[CD_PAD_VOICES] < 2; k++)   /* until two voices or more sing (2 h at most) */
+            run(60.0f);
+        before = (int)en_cond[CD_PAD_VOICES];
+        CHECK(before >= 2, "no full pad to shed from (%d voices)", before);
+        en_load(EN_SHED_UP - 1u, ms);
+        CHECK(en_shed == 0, "the guard sheds under its line (%d)", en_shed);
+        en_overload();
+        en_load(10u, ms += 16u);
+        CHECK(en_shed == 1, "an overrun is not a step (%d)", en_shed);
+        en_load(EN_SHED_UP, ms += 16u);
+        CHECK(en_shed == 1, "two steps within 0.4 s (%d)", en_shed);
+        for (k = 0; k < 4; k++)
+            en_load(EN_SHED_UP, ms += 400u);
+        CHECK(en_shed == 3, "the guard's last step is 3 (%d)", en_shed);
+        peak = 0.0f;
+        run(30.0f);
+        printf("  the guard: %d pad voices before, %d half a minute after its last step, peak %.2f\n", before,
+               (int)en_cond[CD_PAD_VOICES], (double)peak);
+        CHECK((int)en_cond[CD_PAD_VOICES] <= 1, "the guard left %d pad voices", (int)en_cond[CD_PAD_VOICES]);
+        CHECK(!bad && peak < 1.0f, "the guard's shedding clips or NaN (%f)", (double)peak);
+        en_load(EN_SHED_DOWN + 1u, ms += 30000u);
+        CHECK(en_shed == 3, "the guard lets go between its lines (%d)", en_shed);
+        en_load(EN_SHED_DOWN, ms += 19000u);
+        CHECK(en_shed == 3, "the guard lets go before 20 s of calm (%d)", en_shed);
+        for (k = 0; k < 3; k++)
+            en_load(EN_SHED_DOWN, ms += 20000u);
+        CHECK(en_shed == 0, "the guard does not let go (%d)", en_shed);
+    }
+
     /* stop: the tails die away */
     for (i = 0; i < P_NPARAMS; i++)
         en_set(i, en_param_info(i)->def);

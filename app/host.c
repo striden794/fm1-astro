@@ -8,7 +8,8 @@
  * parN battery field tide (fm1-base's own: store_writes clocks_out midi_out peak_db_max peak_db_min). TIDE's: field,
  * the harmonic field's pitch classes (a 12-bit set, C = bit 0); tide, the ebb in tenths of a dB (0: in). Its commands:
  * storeamb (a record as AMB-1 writes it, magic "ENO1", put where TIDE keeps its project: it must not be read);
- * battery N (the battery read as N, plat.h's plat_battery: -1..4; "battery off" the simulator's own, full). */
+ * battery N (the battery read as N, plat.h's plat_battery: -1..4; "battery off" the simulator's own, full);
+ * load N (the audio load read as N per cent: the guard; its checks: shed, pad_voices, cpu_peak). */
 
 int app_expect(const char *what, int *got)
 {
@@ -35,6 +36,12 @@ int app_expect(const char *what, int *got)
         g = (int)en_cond[CD_FIELD_PCS];
     else if (!strcmp(what, "tide"))
         g = (int)(en_cond[CD_EBB] * 10.0f);
+    else if (!strcmp(what, "shed"))             /* the guard's step, 0..3 */
+        g = en_shed;
+    else if (!strcmp(what, "pad_voices"))       /* how many pad voices sing or are entering */
+        g = (int)en_cond[CD_PAD_VOICES];
+    else if (!strcmp(what, "cpu_peak"))
+        g = (int)cpu_pk;
     else if (!strcmp(what, "pad_level"))
         g = (int)(en_pad_level * 100.0f);
     else if (!strcmp(what, "bass_level"))
@@ -62,6 +69,10 @@ int app_host_cmd(const char *cmd, const char *a, const char *b, const char *c, c
     (void)b, (void)c, (void)d;
     if (!strcmp(cmd, "battery")) {               /* battery N: plat_battery as N (-1..4), "battery off" its own */
         batt_host = (int8_t)(strcmp(a, "off") ? atoi(a) : -2);
+        return 1;
+    }
+    if (!strcmp(cmd, "load")) {                  /* load N: the audio load read as N per cent (the guard, amb.h en_load) */
+        load_host = (uint32_t)atoi(a);
         return 1;
     }
     if (!strcmp(cmd, "storeamb")) {

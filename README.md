@@ -1,92 +1,70 @@
-# SAMSARA, from AMB-1, for the M-VAVE FM-1
+# SAMSARA for the M-VAVE FM-1
 
-**SAMSARA** is the name of this work since 2026-11-10; it was built as **TIDE**, and the notes below and the
-source's comments still call it that. Its four pieces are Samsara, Maranasati, Anatta and Nirvana (AMB-1's eight
-are not in it; each of the four began from one of AMB-1's recipes: `app/dsp/amb.c`), and its screen is lapis blue
-and gold.
+SAMSARA turns the M-VAVE FM-1 into a slow ambient piece that plays itself and changes over hours, in the spirit of
+Brian Eno's *Reflection*: a breathing pad, soft bells, a gliding bass and a rare low ground that come and go like
+weather, through a tape echo and a wandering plate. Tone, harmony and density drift; every so often the whole piece
+ebbs nearly to silence and returns. It never repeats and never stands still, unless you turn Drift fully down, which
+holds the moment you are in.
 
-**TIDE** is a personal fork of Charles Vestal's AMB-1 (this tree, from v1.3.2: `UPSTREAM.md`) by Tomorrow's Man: the
-same sounds and platform under a conductor that changes the piece's tone, harmony and density over hours, and four
-knobs on its first page: **Mood, Density, Drift, Space**. What TIDE changes is described in `ARCHITECTURE.md`
-(sections 11 to 16); AMB-1's own text follows unchanged, and its links lead to AMB-1, not to TIDE. Every credit and
-licence below stands (`LICENSING.md`).
+![SAMSARA's screen: the Tide page](docs/img/screen-tide.png) ![Maranasati](docs/img/screen-maranasati.png) ![Hold](docs/img/screen-hold.png)
 
-| TIDE's pages | KNOB 1 | KNOB 2 | KNOB 3 | KNOB 4 |
-|---|---|---|---|---|
-| Tide (HOME) | Mood | Density | Drift (fully down: Hold) | Space |
-| Pad (ENV) | Level | Swell | Bright | Colour |
-| Bells (ARP) | Amount | Tone | Octave | Evolve |
-| Bass (LFO) | Level | Octave | Glide | Fifth |
-| Ground (SEQ) | Level | Motion | Tempo | |
-| Space (FX) | Echo | Echo time | Reverb | Size |
-| Setup (GLO) | Root | Tune | MIDI out | Lights |
+**SAMSARA is a fork of [AMB-1](https://github.com/charlesvestal/fm1-amb) by Charles Vestal** (from its version 1.3.2:
+[UPSTREAM.md](UPSTREAM.md)), by Tomorrow's Man. The sounds (the pad, the bells, the bass, the echo, the plate), the
+pages and the whole platform are AMB-1's. SAMSARA's own part is the conductor over them: the weather, the tide, the
+seasons, the wandering harmony and tone, a loudness governor, the ground layer, the first page's four knobs and the
+wheel on the screen. It was built under the working name **TIDE**; the source's comments and
+[ARCHITECTURE.md](ARCHITECTURE.md) still call it that.
 
----
+- **The manual**: [docs/MANUAL.md](docs/MANUAL.md)
+- **The firmware file**: [releases](https://github.com/tomorrowsman/fm1-samsara/releases)
 
-# AMB-1 for the M-VAVE FM-1
-
-AMB-1 turns the M-VAVE FM-1 into a generative ambient machine, inspired by Brian Eno's
-*Music for Airports*. It plays itself from the moment it's switched on: breathing voices, soft
-bells on tape loops of unequal length, a gliding bass and quiet Euclidean percussion, all through
-a tape echo, a long tape loop and a plate reverb. You don't perform it, you tend it: pick a piece
-and a scale, take notes out, put them back, and let it grow.
-
-![AMB-1's screen: the garden](docs/img/screen-garden.png) ![Voices](docs/img/screen-voices.png) ![Frozen](docs/img/screen-frozen.png)
-
-- **Try it in your browser** (no FM-1 needed): <https://charlesvestal.github.io/fm1-amb/emu/>
-- **Install it** (Chrome or Edge, with the FM-1 plugged in): <https://charlesvestal.github.io/fm1-amb/install/>
-- **Read the manual**: <https://charlesvestal.github.io/fm1-amb/manual/> (source: [docs/MANUAL.md](docs/MANUAL.md))
-- **Download the firmware file**: [releases](https://github.com/charlesvestal/fm1-amb/releases)
-
-Installing it is at your own risk, though it's hard to get stuck: the web installer can put
-M-VAVE's own firmware back, and an FM-1 that fails to start twice comes up in a safe mode the
-installer can reach.
+Installing it is at your own risk, though it's hard to get stuck: M-VAVE's own firmware can be put back, and an FM-1
+that fails to start twice comes up in a safe mode an installer can reach (the manual, Troubleshooting). SAMSARA keeps
+its pieces in its own place in the FM-1's memory and leaves AMB-1's alone.
 
 ## In short
 
 | | |
 |---|---|
+| HOME page, KNOB 1–4 | **Mood** (dark to bright), **Density**, **Drift** (the pace of all change; fully down: Hold), **Space** (near to far) |
+| PRESETS | The piece: Samsara, Maranasati, Anatta, Nirvana |
 | Keys | The scale: each key adds its note or takes it out |
 | PLAY · REC · EDIT | Grow / rest · freeze · the next chord |
-| HOME · ENV · ARP · LFO · SEQ · FX · GLO | The pages: Garden, Pad, Bells, Bass, Pulse, Space, Setup; KNOB 1–4 set their values, a layer's level on KNOB 1 |
+| ENV · ARP · LFO · SEQ · FX · GLO | The other pages: Pad, Bells, Bass, Ground, Space, Setup |
 | SELECT | The previous or next page; with HOME held, the tempo |
-| ALGORITHM · PRESETS | The mode · the piece (eight of them) |
-| OCT− / OCT+ | The bells' octave |
+| ALGORITHM | The home mode |
+| OCT− / OCT+ | The bells' octave; both for 5 seconds: update mode |
 | SAVE | Saves; held, puts the piece back to its recipe |
 
-Hold any button for a second and a card says what it does.
-
-AMB-1 also tells the [FM-1 Screen Reader](https://charlesvestal.github.io/fm1-reader/) what its screen
-shows, over USB: the page and its knobs, a knob's value as it turns, the piece, the chord as it moves,
-and what each button did.
-
-The [manual](https://charlesvestal.github.io/fm1-amb/manual/) has the rest.
+Hold any button for a second and a card says what it does. SAMSARA also tells the
+[FM-1 Screen Reader](https://charlesvestal.github.io/fm1-reader/) what its screen shows, as AMB-1 does.
 
 ## Building and testing
 
-AMB-1 is an app on [fm1-base](https://github.com/charlesvestal/fm1-base) (`base/`, a git submodule); clone with
-`--recursive`. The toolchain and prerequisites are in [BUILDING.md](BUILDING.md):
+SAMSARA is an app on [fm1-base](https://github.com/charlesvestal/fm1-base), which is in this tree as a plain folder
+(`base/`, with felucca-bsp in `base/bsp/`; their commits are in [UPSTREAM.md](UPSTREAM.md)). The toolchain and
+prerequisites are in [BUILDING.md](BUILDING.md):
 
 ```
-sh tests/run_tests.sh                                  # the instrument, the app in a simulator, the web builds
-./build.sh                                             # app/build/amb.fwsc
-python3 base/tools/fm1_install.py app/build/amb.fwsc   # install it over USB
+sh tests/run_tests.sh                                      # the instrument, the app in a simulator, the web builds
+./build.sh                                                 # app/build/samsara.fwsc (Linux, or GitHub: BUILDING.md)
+python3 base/tools/fm1_install.py app/build/samsara.fwsc   # install it over USB
 ```
 
-`app/build/host/amb_host SCRIPT OUTDIR` runs the whole app on a computer from a script
+`app/build/host/samsara_host SCRIPT OUTDIR` runs the whole app on a computer from a script
 (`tests/scenarios/*.amb`), with audio and screenshots coming out. `./build.sh --web` builds the same code for the
-browser (the emulator); `web/app/build.sh` builds the engine alone into a web app for phone and desktop.
+browser (the emulator).
 
 ## Credits
 
-The idea comes from Brian Eno's generative music: *Music for Airports*' tape loops of unequal
-length, and the echo chain of *Discreet Music*. The reverb is Jon Dattorro's plate ("Effect Design,
-Part 1", JAES 1997), as in [FoMni-1](https://github.com/charlesvestal/fm1-fomni); the Euclidean
-rhythms are Godfried Toussaint's reading of Bjorklund's algorithm. AMB-1 is built on
+SAMSARA stands on AMB-1 by Charles Vestal, and every credit of AMB-1's stands here. The idea comes from Brian Eno's
+generative music: *Music for Airports*' tape loops of unequal length, the echo chain of *Discreet Music*, the
+endlessness of *Reflection*. The reverb is Jon Dattorro's plate ("Effect Design, Part 1", JAES 1997), as in
+[FoMni-1](https://github.com/charlesvestal/fm1-fomni). AMB-1 and SAMSARA are built on
 [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp](https://github.com/hugelton/felucca-bsp),
 from [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita (Hügelton Instruments). The idea of running
-FM-1 firmware in the browser comes from [Groove OS](https://www.groove-os.com/). MPL-2.0 (0.9 and earlier:
-GPL-3.0-only); see [LICENSING.md](LICENSING.md).
+FM-1 firmware in the browser comes from [Groove OS](https://www.groove-os.com/). MPL-2.0; see
+[LICENSING.md](LICENSING.md).
 
-M-VAVE and FM-1 are trademarks of their owners. AMB-1 is not affiliated with M-VAVE, Brian Eno or
+M-VAVE and FM-1 are trademarks of their owners. SAMSARA is not affiliated with M-VAVE, Brian Eno, Charles Vestal or
 Hügelton Instruments.

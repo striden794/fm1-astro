@@ -169,6 +169,25 @@ static const char *mode_name(void)
     return proj.pool == EN_MODE_POOL[proj.par[P_MODE]] ? EN_MODE_NAME[proj.par[P_MODE]] : "Custom";
 }
 
+/* the audio load, for the guard (amb.h en_load) and the Setup page: as it is now, and the most it has been since
+ * switching on (Phase 7's question: under 70 % over eight hours?). In the simulator and the browser the load is the
+ * computer's and says nothing about the FM-1: it reads 0 there unless a script sets it ("load N"), so the guard
+ * never acts on its own and a run is the same every time. */
+static uint32_t cpu_pk;
+#ifdef PLAT_HOST
+static uint32_t load_host;                     /* the simulator's "load N" */
+static uint32_t cpu_now(void) { return load_host; }
+#else
+static uint32_t cpu_now(void) { return plat_cpu_pct(); }
+#endif
+static void guard_tick(void)
+{
+    uint32_t c = cpu_now();
+    if (c > cpu_pk)
+        cpu_pk = c;
+    en_load(c, plat_ms());
+}
+
 /* ------------------------------------------------------------ values --- */
 static int knob_get(int k)
 {
@@ -177,7 +196,7 @@ static int knob_get(int k)
     if (k == K_LEDS)
         return proj.leds;
     if (k == K_CPU)
-        return (int)plat_cpu_pct();
+        return (int)cpu_now();
     return 0;
 }
 static void knob_range(int k, int *lo, int *hi)
@@ -687,7 +706,7 @@ static void draw_header(void)
     int msg = plat_ms() < ui.msg_until;
     uint32_t h = hash(hash(hash(2166136261u, proj.piece | (uint32_t)en_field_root << 8 | (uint32_t)en_field_pool << 12),
                            en_playing | ui.dirty << 4 | (uint32_t)msg << 5 | (uint32_t)en_ext << 6 | (uint32_t)proj.par[P_MODE] << 8),
-                      (uint32_t)proj.par[P_TEMPO] | (ui.view == V_SETUP ? plat_cpu_pct() << 8 : 0u) |
+                      (uint32_t)proj.par[P_TEMPO] | (ui.view == V_SETUP ? (cpu_now() << 8 ^ cpu_pk << 15 ^ (uint32_t)en_shed << 22) & 0xFFFF00u : 0u) |
                       (uint32_t)(batt() + 1) << 24);
     if (msg)
         h = hash(hash(h, (uint32_t)ui.msg[0][0] << 8 | ui.msg[0][1]), ui.msg_until);
@@ -720,22 +739,40 @@ static void draw_header(void)
             itoa_u((uint32_t)proj.par[P_TEMPO], t);
         }
         if (ui.view == V_SETUP) {                 /* Setup: the audio load too */
-            char c[12] = "CPU ";
-            itoa_u(plat_cpu_pct(), c + 4);
+            char c[24] = "CPU ", *e;              /* "CPU 41 PK 55", and "THIN 2" before it while the guard sheds */
+            itoa_u(cpu_now(), c + 4);
+            for (e = c; *e; e++)
+                ;
+            *e++ = ' ';
+            *e++ = 'P';
+            *e++ = 'K';
+            *e++ = ' ';
+            itoa_u(cpu_pk, e);
             x -= text_w(&FONT_XS, c);
             cv_text(x, 8, &FONT_XS, c, K_DIM);
-            x -= 10;
+            x -= 8;
+            if (en_shed) {
+                char g[8] = "THIN ";
+                itoa_u(en_shed, g + 5);
+                x -= text_w(&FONT_XS, g);
+                cv_text(x, 8, &FONT_XS, g, K_ACC);
+                x -= 8;
+            }
         }
-        x -= text_w(&FONT_S, t);
-        cv_text(x, 6, &FONT_S, t, en_playing ? K_TEXT : K_DIM);
-        x -= 16;
-        if (en_playing) {                         /* a slow beat light */
-            int on = ((en_bars / 4u) & 1u) == 0u;
-            cv_round(x, 9, 10, 10, 5, on ? K_PAD : K_PAD_T);
+        if (ui.view == V_SETUP && en_shed) {
+            x += 6;                               /* (the guard's words take the tempo's and the beat light's room) */
         } else {
-            int32_t j;                            /* resting: a play triangle */
-            for (j = 0; j < 5; j++)
-                cv_rect(x + 2 + j, 9 + j, 1, 11 - 2 * j, K_DIM);
+            x -= text_w(&FONT_S, t);
+            cv_text(x, 6, &FONT_S, t, en_playing ? K_TEXT : K_DIM);
+            x -= 16;
+            if (en_playing) {                     /* a slow beat light */
+                int on = ((en_bars / 4u) & 1u) == 0u;
+                cv_round(x, 9, 10, 10, 5, on ? K_PAD : K_PAD_T);
+            } else {
+                int32_t j;                        /* resting: a play triangle */
+                for (j = 0; j < 5; j++)
+                    cv_rect(x + 2 + j, 9 + j, 1, 11 - 2 * j, K_DIM);
+            }
         }
         w = text_w(&FONT_B, piece_name(proj.piece)) + 12;   /* the piece, in a coral tag */
         cv_round(4, 4, w, 20, 6, K_TEXT);
@@ -1206,8 +1243,12 @@ static void sp_page(int all)
         sp_cat(", not saved yet");
     if (ui.view == V_SETUP) {
         sp_cat(". CPU ");
-        sp_int(plat_cpu_pct());
+        sp_int(cpu_now());
+        sp_cat("%, peak ");
+        sp_int(cpu_pk);
         sp_cat("%");
+        if (en_shed)
+            sp_cat(", thinning");
     }
     if (batt_words(batt())) {
         sp_cat(". ");
@@ -1526,6 +1567,7 @@ void ui_init(void)
 void ui_frame(void)
 {
     input();
+    guard_tick();
     autosave();
     draw_header();
     draw_main();

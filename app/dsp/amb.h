@@ -90,6 +90,18 @@ void en_clock(int msg);
 /* the render (audio ISR): n stereo frames, 24-bit in int32; gain Q12 (the MASTER pot) */
 void en_render(int32_t *out_lr, uint32_t n, uint32_t gain_q12);
 
+/* SAMSARA Phase 7: the guard (the kit's rule 6: thin voices before the audio glitches). The main loop tells the
+ * engine the audio load (per cent of a block's time, smoothed; the time in ms), an overrun flags itself from the
+ * render, and the engine sheds in three steps, each through an envelope, so the guard itself is never a glitch:
+ * 1 the bells ring four at a time at most (the others die away in a quarter second), 2 the pad sings two voices at
+ * most and three bells, 3 one voice and two bells. It lets go a step every 20 s of calm. A desktop render and the
+ * simulator never call it, so it changes no sample there. */
+extern volatile uint8_t en_shed;               /* 0 (nothing shed) .. 3 */
+void en_load(uint32_t pct, uint32_t ms);       /* the main loop, every frame */
+void en_overload(void);                        /* the render took over 90 % of its time (any context) */
+#define EN_SHED_UP 62u                         /* per cent: at or over it, a step more (0.4 s apart) */
+#define EN_SHED_DOWN 50u                       /* at or under it for 20 s, a step less */
+
 /* MIDI out, from the render: the app sends it (USB); status, data 1, data 2 */
 void en_midi_out(uint32_t st, uint32_t d1, uint32_t d2);
 

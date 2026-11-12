@@ -831,3 +831,38 @@ out and comes to a point at the rim (`wh_spoke`).
 - **Cost:** 71 by 71 pixels (53 by 53 at the first size), one square root each and no arctangent (the pixel is turned into the wheel's frame and
   folded into one wedge), on each redraw of the garden (at most 20 a second, and only when something on it changed;
   `en_drift` was already in the redraw's signature in 40 steps a chord). Unmeasured on the device: Phase 7's CPU check.
+
+## 18. SAMSARA Phase 7, before the first flash: the guard, the package's identity, the pictures (2026-11-11)
+
+**The guard** (the kit's rule 6: "keep a guard that thins voices before audio glitches"; AMB-1 has none, section 4).
+`app/dsp/amb.h` `en_load(pct, ms)`, `en_overload()`, `en_shed`; `app/dsp/amb.c` above `bell_voice`.
+
+- **What it reads.** `ui_frame` (`guard_tick`, `app/ui.c`) gives the engine `plat_cpu_pct()` (the render's share of a
+  5.8 ms block, smoothed over about 16 blocks) every frame; fm1-base's `APP_OVERLOAD` hook (`app_overload`, one block
+  over 90 %) sets a flag the next `en_load` reads as 100 %.
+- **Its steps** (`en_shed` 0..3). At or over 62 % (`EN_SHED_UP`) a step more, at most one every 0.4 s; at or under 50 %
+  (`EN_SHED_DOWN`) for 20 s, a step less; between the two it stays. Step 1: four bells at a time (`SHED_NBELL`; a bell
+  over the count dies away in a quarter second: its own decay shortened, no cut). Step 2: three bells, the pad two
+  voices at most (`SHED_NPAD`, in `pad_step`, Hold or not); a voice the guard sends out leaves at 1 dB/s, the swell
+  limit. Step 3: two bells, one pad voice, a voice out in about seven seconds (6 dB/s). The render skips a silent
+  voice, so each step is load taken off. Nothing is switched: every step goes through an envelope.
+- **Why 62 and 50.** The Definition of done asks for a peak under 70 %; the load is smoothed, so the guard acts under
+  it. Both numbers are guesses until the FM-1 says what SAMSARA costs (unmeasured: the first thing after a flash).
+- **Where it cannot act.** A desktop render never calls `en_load`. In the simulator and the browser the load is the
+  computer's, so `cpu_now()` there is 0 unless a script says `load N` (`app/host.c`): a run stays the same every
+  time, and the Setup page reads "CPU 0 PK 0" in the emulator.
+- **The screen.** Setup's top line: `CPU 41 PK 55` (now, and the most since switching on: the figure the 8-hour run
+  is read from), and `THIN 2` in gold in the tempo's place while the guard sheds. The reader says "peak" and
+  "thinning".
+- **Tests.** `tests/host/amb_test.c` (the steps, the spacing, the calm, one voice left of two or more);
+  `tests/scenarios/guard.amb` (the same through the app, with pictures).
+
+**The identity** (`app/fm1.toml`): `id_prefix = "FM-1_108"` (dev `FM-1_10800`, releases `FM-1_108XXYYZZ`; AMB-1's is
+`FM-1_7`, so an installer no longer takes one for the other), `repo`, `install` and `site` at
+`github.com/tomorrowsman/fm1-samsara`. `.gitmodules` is gone (the tree was flattened on import: `UPSTREAM.md`) and
+`release.yml` no longer asks for submodules. `.github/workflows/dev.yml` is new: the package built on GitHub by hand,
+unsigned, for trying on the FM-1 (`BUILDING.md`).
+
+**The pictures and the words.** `docs/MANUAL.md` and `README.md` are SAMSARA's (AMB-1's manual is in
+`vendor/fm1-amb/docs/`); `docs/img/` holds SAMSARA's screens (`docs/img/shots.amb` makes them) and the panel drawing
+with its labels. `tools/make_pages.py`, `tools/publish_pages.sh` and `web/app/` are still AMB-1's.

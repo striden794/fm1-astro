@@ -63,6 +63,8 @@ void ui_say(const char *a, const char *b);
 void app_init(void);                     /* boot: the engine, then the saved project (or the defaults) */
 void app_render(int32_t *lr, uint32_t n, uint32_t gain_q12);   /* audio interrupt: n stereo frames, 24-bit */
 void app_panic(void);                    /* silence now (before an update rewrites the flash) */
+#define APP_OVERLOAD                     /* fm1-base calls app_overload when a block took over 90 % of its time */
+void app_overload(void);                 /* the guard sheds a step (amb.h en_load) */
 void app_ui_init(void);
 void app_frame(void);
 void app_input_only(void);

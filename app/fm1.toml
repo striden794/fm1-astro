@@ -1,8 +1,8 @@
 # SAMSARA's build settings (SAMSARA is the name Tomorrow's Man gave TIDE on 2026-11-10), from AMB-1's (fm1-base's
-# tools/build.py: ./build.sh). The package identity (id_prefix), repo, install and site below are still AMB-1's:
-# Phase 7 gives SAMSARA its own before anything is published (ARCHITECTURE.md section 16).
+# tools/build.py: ./build.sh). The package identity, repo, install and site are SAMSARA's own since Phase 7
+# (2026-11-11; ARCHITECTURE.md section 18).
 name = "SAMSARA"               # the build's files: samsara.fwsc, samsara-X.Y.fwsc (AMB-1's: amb)
-id_prefix = "FM-1_7"           # package identity: dev FM-1_700, releases FM-1_7XXYYZZ (as AMB-1 0.9)
+id_prefix = "FM-1_108"         # package identity: dev FM-1_10800, releases FM-1_108XXYYZZ (AMB-1's is FM-1_7)
 usb_manufacturer = "SAMSARA"
 usb_product = "SAMSARA FM-1"
 ble = false                    # AMB-1 never uses the radio
@@ -13,7 +13,7 @@ include = ["dsp"]
 o2 = ["dsp/amb.c"]             # the engine, at -O2
 # the site
 tagline = "An ambient piece for the FM-1 that never repeats and never stands still"
-repo = "https://github.com/charlesvestal/fm1-amb"
+repo = "https://github.com/tomorrowsman/fm1-samsara"
 licence = "MPL-2.0"
 credits = "From AMB-1 by Charles Vestal. Built on fm1-base and felucca-bsp, from Felucca by Leo Kuroshita (Hügelton Instruments)."
 
@@ -21,6 +21,6 @@ credits = "From AMB-1 by Charles Vestal. Built on fm1-base and felucca-bsp, from
 author = "Tomorrow's Man, from AMB-1 by Charles Vestal"
 description = "SAMSARA turns the M-VAVE FM-1 into a slow generative ambient piece that changes in tone, harmony and density over hours: a pad, soft bells, a gliding bass and a rare low ground that come and go like weather, through a tape echo and a wandering plate. Four pieces (Samsara, Maranasati, Anatta, Nirvana) and four knobs: Mood, Density, Drift, Space. It is a fork of Charles Vestal's AMB-1."
 tags = ["ambient", "generative", "fm"]
-install = "https://charlesvestal.github.io/fm1-amb/install/"
-site = "https://charlesvestal.github.io/fm1-amb/"
-screenshot = "docs/img/screen-garden.png"
+install = "https://github.com/tomorrowsman/fm1-samsara/releases"
+site = "https://github.com/tomorrowsman/fm1-samsara"
+screenshot = "docs/img/screen-tide.png"
