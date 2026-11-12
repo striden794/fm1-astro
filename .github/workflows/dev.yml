@@ -79,7 +79,7 @@ jobs:
           ls -l app/build build/dev-assets
           (cd build/dev-assets && sha256sum * | tee SHA256SUMS)
 
-      - name: Tests (the instrument, the app in the simulator, the update path; the browser builds need Emscripten: skipped)
+      - name: Tests (the instrument, the app in the simulator, the update path; no browser builds here)
         shell: bash
         run: sh tests/run_tests.sh
 
