@@ -825,6 +825,9 @@ out and comes to a point at the rim (`wh_spoke`).
 - **Its gold sinks with the tide:** `mix(K_BELL_T, K_ACC, 5 + 11 * tide_px() / 80)`.
 - **The chord's name** moved from the middle (the hub's place) to the top line of the garden, between the timbre
   anchor and the way to the next chord, in `FONT_S`.
-- **Cost:** 53 by 53 pixels, one square root each and no arctangent (the pixel is turned into the wheel's frame and
+- **Larger (2026-11-11, Tomorrow's Man's TESTING #40: "could the bell rings be closer together so the wheel can be larger?"):**
+  the four bell rings stand 5 pixels apart (`LOOP_R` 42, 47, 52, 57; they were 7 apart from 36) and the rim's radius
+  is 33 (`WH_RIM`; it was 24), so the wheel is 66 pixels across. Hub, eye and spokes grow with the rim (`WH_S`).
+- **Cost:** 71 by 71 pixels (53 by 53 at the first size), one square root each and no arctangent (the pixel is turned into the wheel's frame and
   folded into one wedge), on each redraw of the garden (at most 20 a second, and only when something on it changed;
   `en_drift` was already in the redraw's signature in 40 steps a chord). Unmeasured on the device: Phase 7's CPU check.

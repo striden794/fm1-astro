@@ -764,7 +764,7 @@ static void draw_header(void)
  * right, the four layers' levels on the left */
 #define CX 120
 #define CY 84
-static const int32_t LOOP_R[EN_NLOOP] = {36, 43, 50, 57};
+static const int32_t LOOP_R[EN_NLOOP] = {42, 47, 52, 57};   /* 5 apart (7 until Tomorrow's Man's TESTING #40): room for the wheel */
 
 static void polar(int32_t cx, int32_t cy, float r, int i, int n, int32_t *x, int32_t *y)
 {
@@ -789,15 +789,16 @@ static const char *chord_now(char *nm)          /* the chord's name, as the gard
  * chord carries on where the last one ended. No arctangent: a pixel is turned into the wheel's frame and folded
  * into the wedge between one spoke and the next, where it is near one of two axes. One square root a pixel. */
 static int32_t tide_px(void);
-#define WH_RIM 24.0f                            /* the ring of twelve's radius */
-#define WH_HUB 6.5f
+#define WH_RIM 33.0f                            /* the ring of twelve's radius (24 until TESTING #40: "larger") */
+#define WH_S (WH_RIM / 24.0f)                    /* the wheel was drawn at 24: hub, eye and spokes grow with it */
+#define WH_HUB (6.5f * WH_S)
 static float wh_spoke(float al, float ac)       /* along a spoke's axis from the middle, and across it: coverage 0..1 */
 {
-    const float base = WH_HUB - 1.5f, tip = WH_RIM - 0.5f, belly = 0.64f;   /* widest two thirds of the way out */
+    const float base = WH_HUB - 1.5f * WH_S, tip = WH_RIM - 0.5f, belly = 0.64f;   /* widest two thirds of the way out */
     float t = (al - base) / (tip - base), w;
     if (t <= 0.0f || t >= 1.0f)
         return 0.0f;
-    w = t < belly ? 0.8f + 2.0f * (t / belly) : 2.8f * (1.0f - t) / (1.0f - belly);
+    w = WH_S * (t < belly ? 0.8f + 2.0f * (t / belly) : 2.8f * (1.0f - t) / (1.0f - belly));
     return fm_clampf(w - ac + 0.5f, 0.0f, 1.0f);
 }
 
@@ -822,7 +823,7 @@ static void draw_wheel(float turn, uint16_t c)
             k = wh_spoke((u + v) * 0.70710678f, (u - v) * 0.70710678f);             /* and the one 45 degrees on */
             cov = fm_maxf(cov, k);
             cov = fm_maxf(cov, fm_clampf(WH_HUB + 0.5f - d, 0.0f, 1.0f));           /* the hub */
-            cov *= fm_clampf(d - 2.5f + 0.5f, 0.0f, 1.0f);                          /* its eye */
+            cov *= fm_clampf(d - 2.5f * WH_S + 0.5f, 0.0f, 1.0f);                         /* its eye */
             cov = fm_maxf(cov, 0.75f * fm_clampf(1.2f - fm_fabsf(d - WH_RIM), 0.0f, 1.0f));   /* the rim, under the notes */
             px_blend(CX + x, CY + y, c, (uint32_t)(cov * 16.0f + 0.5f));
         }
