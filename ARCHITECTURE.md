@@ -866,3 +866,35 @@ unsigned, for trying on the FM-1 (`BUILDING.md`).
 **The pictures and the words.** `docs/MANUAL.md` and `README.md` are SAMSARA's (AMB-1's manual is in
 `vendor/fm1-amb/docs/`); `docs/img/` holds SAMSARA's screens (`docs/img/shots.amb` makes them) and the panel drawing
 with its labels. `tools/make_pages.py`, `tools/publish_pages.sh` and `web/app/` are still AMB-1's.
+
+## 19. SAMSARA after v1: the pad's turn (2026-11-13)
+
+After Tomorrow's Man's sign-off: "the way the pad can take over sometimes for a very long time is really the only thing left
+that gets distracting". Where the numbers of §11 to §15 differ, these win. All in `app/dsp/amb.c` unless said.
+
+- **What was measured** (the v1 take, seed 1107, 8 h). A pad voice sings 90% of the time, in stretches of up to 27
+  minutes; the pad holds over 70% of the energy 23% of the time, and its six longest such stretches (10 to 15 minutes)
+  are the bass's six longest rests, when the foundation rule keeps a voice up and hands it on voice to voice.
+- **The turn** (`cd.turn`, `cd.turn_max`, `PAD_TURN` 75-210 real seconds; `pad_step`). It counts while a voice is up
+  (within 15 dB of full) or the pad leads (over half the energy) from lower down. If the pad rests by itself (no
+  voice heard for 20 s) a new turn is drawn.
+- **The recess** (`cd.recessing`, `cd.dip`, `cd.dip_depth`, `cd.recess`, `PAD_RECESS` 20-70 s, `PAD_DIP_FALL` 0.1 dB/s,
+  `PAD_DIP_RISE` 0.12). At the end of a turn the pad's gain (not the voices) goes 10-15 dB down, stays, and comes
+  back: the ebb's shape, for the pad alone (`cd.g[L_PAD]` in `governor_step`). At the bottom the voice nearest the
+  end of its stay is let go. The governor's trim does not lift while the dip is 3 dB or more down. While the recess
+  returns, a voice's own rise is less by the recess's, so the pair is the rate budget's one rise. In a piece without
+  a bass, with its bells away, the recess is 6-8 dB.
+- **The bass's rest is bounded by it** (`bass_step`, `PAD_CARRY` 150-300 s). When the bass begins a rest the pad is
+  given a fresh turn of that length; at its end the bass is called back (`bass.rest_t = bass.gap`) and the recess
+  begins once the bass is above -20 dB. The bass does not begin a rest during a recess.
+- **A voice's rise is 0.36 dB/s** (`pad_enter`; 0.4 since Phase 3): the swell limit's margin, which v1 did not have
+  (1.48 of 1.5 dB in 2 s; two takes with the turn read 1.50).
+- **Tried and dropped the same day:** the recess as a rest (every voice out, the bass called back first). The bass
+  never rested again and led for 44 and 78 minutes at a stretch, the pad's share fell to 13-23%, and a pad that
+  returns from nothing each time broke the swell limit. Then a shallow recess while the bass rests, the bass left
+  alone: the pad still held over 70% of the energy for 15 minutes.
+- **Exports**: `en_cond[CD_PAD_DIP]` (CSV `c_pad_dip`). Host only: `en_host_pad_turn(lo, hi, rlo, rhi)`, the harness
+  command `pad_turn` (`pad_turn 0`: no turns).
+- **Tests** (`tests/host/amb_test.c`): in 2 h at Drift 50 the pad is never up and undipped for more than 480 s, three
+  or more recesses, each back, none deeper than 15 dB. All pass, the simulator scenarios and browser builds too.
+- **Cost**: a few operations a conductor step; nothing per sample. **Not on the FM-1**: the device runs v1 (75b05fa).

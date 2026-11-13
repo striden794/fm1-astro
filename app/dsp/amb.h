@@ -129,7 +129,7 @@ enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_P
        CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
        CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF,
        CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE,
-       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, CD_EBB, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
+       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, CD_EBB, CD_PAD_DIP, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
                                                            * under them is (0..1), the field's pitch classes (a 12-bit set, C = bit 0);
                                                            * Phase 5c: the ebb, dB (0: the tide is in) */
 extern const char *const EN_COND_NAME[EN_NCOND];
@@ -174,6 +174,8 @@ void en_host_mute(int layer, int on);          /* mute a layer's output after th
 void en_host_plate_exc(float k);               /* the plate's modulation depth, 0..1 of AMB-1's (an A/B, TESTING #18) */
 void en_host_plate_range(float lo_hz, float hi_hz);   /* the wandering plate's range of rates, Hz (Phase 5b: 0.25..1.3) */
 void en_host_plate_mod(float rate_hz, int wander);   /* its rate (0: as it is, 0.70 Hz), and the wandering mode (an A/B) */
+void en_host_pad_turn(float lo, float hi, float rlo, float rhi);   /* the pad's turn and recess, real seconds (the engine's:
+                                                * 75..210 and 20..70); lo <= 0: no turns, v1's pad (an A/B) */
 /* the governor's plate and echo energies each conductor step, to record (the mix pass) or replace (a solo pass):
  * with the muted layers' sends gone the effects return less, and the governor would steer differently */
 extern void (*en_host_meter_hook)(float *plate, float *echo);

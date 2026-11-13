@@ -24,6 +24,8 @@
  *   plate_rate 0.7 | plate_wander host only: a steady modulation rate for the plate, in Hz (AMB-1's: 0.7), or back to the
  *                                 engine's own (Phase 5b: each half of the tank on a rate that wanders 0.25-1.3 Hz)
  *   plate_range 0.5 1.3           host only: the wandering plate's range of rates, Hz
+ *   pad_turn 75 210 20 70         host only: the pad's turn (seconds with a voice up) and its recess (seconds unheard);
+ *                                 "pad_turn 0": no turns, the pad as v1 had it (an A/B). Before "play"
  * --solo mutes the other three layers (en_host_mute: their dry sound and their sends), so a solo render's output
  * is that layer alone with its own echo and reverb, and the four solo renders sum to the mix (up to the output's
  * soft clip). The governor would then hear a thinner garden than in the mix pass and the passes would drift apart
@@ -367,6 +369,10 @@ static int run_cmd(const char *text, double t)
     } else if (!strcmp(c, "plate_range")) {     /* host only: the wandering plate's rates, Hz (the engine's: 0.25 1.3) */
         if (n >= 3)
             en_host_plate_range((float)atof(a), (float)atof(b));
+    } else if (!strcmp(c, "pad_turn")) {        /* host only: the pad's turn, and its recess, seconds; "pad_turn 0": none */
+        float v[4] = {75.0f, 210.0f, 20.0f, 70.0f};
+        sscanf(text, "%*s %f %f %f %f", &v[0], &v[1], &v[2], &v[3]);
+        en_host_pad_turn(v[0], v[1], v[2], v[3]);
     } else if (!strcmp(c, "plate_wander")) {    /* host only: each half's rate wanders 0.25-1.3 Hz, never periodic */
         en_host_plate_mod(0.0f, 1);
     } else if (!strcmp(c, "mode")) {

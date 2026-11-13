@@ -508,6 +508,8 @@ int main(void)
      * come back; their level, a slewed sum of walkers, never moves faster than the swell limit */
     {
         int s, rests = 0, back = 0, resting = 0, longest = 0, cur = 0, rate_bad = 0, pad_none = 0, pad_longest = 0;
+        int pad_up = 0, pad_up_longest = 0, pad_up_total = 0, dips = 0, dips_back = 0, in_dip = 0;
+        float dip_low = 0.0f;
         float prev = -60.0f;
         en_init();
         en_set(P_DRIFT, 50);
@@ -521,6 +523,27 @@ int main(void)
             pad_none = en_cond[CD_PAD_VOICES] < 0.5f ? pad_none + 1 : 0;   /* Phase 5: the pad's rest is bounded too */
             if (pad_none > pad_longest)
                 pad_longest = pad_none;
+            {   /* 2026-11-13: and so is its turn. A voice up (within 15 dB of full) with the pad's recess not at work
+                 * (the dip above -3 dB) for longer than a turn's 210 s and the dip's own way down and back is the pad
+                 * taking over; and every recess comes back */
+                int k, up = 0;
+                const float dip = en_cond[CD_PAD_DIP];
+                for (k = 0; k < EN_NPAD; k++)
+                    up |= en_pad_amp[k] > 0.178f;
+                pad_up = up && dip > -3.0f ? pad_up + 1 : 0;
+                if (pad_up > pad_up_longest)
+                    pad_up_longest = pad_up;
+                pad_up_total += up && dip > -3.0f;
+                if (dip < dip_low)
+                    dip_low = dip;
+                if (!in_dip && dip < -5.0f) {
+                    in_dip = 1;
+                    dips++;
+                } else if (in_dip && dip > -0.5f) {
+                    in_dip = 0;
+                    dips_back++;
+                }
+            }
             if (fabsf(lv - prev) > 1.0f)
                 rate_bad++;
             prev = lv;
@@ -543,6 +566,14 @@ int main(void)
                rests, longest, back, (double)en_cond[CD_BELLS]);
         printf("  the pad, the same 2 h: the longest stretch with no voice singing %d s\n", pad_longest);
         CHECK(pad_longest <= 720, "the pad sang nothing for %d s at Drift 50 (its rest ends after 4-10 min, then the entrance's own wait)", pad_longest);
+        printf("  the pad's turn, the same 2 h: up and undipped %d%% of the time, %d s at a stretch at the most; %d recesses, %d back, the deepest %.1f dB\n",
+               pad_up_total * 100 / 7200, pad_up_longest, dips, dips_back, (double)dip_low);
+        CHECK(pad_up_longest <= 480, "the pad was up for %d s at a stretch (a turn is 75-210 s, 150-300 while the bass rests, then the bass's return and the recess)", pad_up_longest);
+        CHECK(pad_up_total >= 7200 / 10, "the pad was up only %d s of two hours", pad_up_total);
+        CHECK(dips >= 3, "only %d recesses of the pad in two hours", dips);   /* (5 to 12 in four builds of 2026-11-13: a turn
+                                                 * counts only while a voice is up, and the pad rests by itself too) */
+        CHECK(dips_back >= dips - 1, "%d recesses, %d back", dips, dips_back);
+        CHECK(dip_low >= -15.5f, "a recess went to %.1f dB (15 at the most)", (double)dip_low);
         CHECK(rests >= 1, "the bells never rested in two hours at Drift 50");
         CHECK(back >= 1 || rests == 0, "the bells rested and never came back");
         CHECK(rate_bad == 0, "the bells' level moved over 1 dB/s at %d moments", rate_bad);

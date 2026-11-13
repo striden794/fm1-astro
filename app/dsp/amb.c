@@ -340,7 +340,7 @@ const char *const EN_COND_NAME[EN_NCOND] = {
     "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
     "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
     "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff", "cursor_x", "cursor_y", "anchor",
-    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs", "ebb"};
+    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs", "ebb", "pad_dip"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told. TIDE Phase 5: the field's scale, relative to the field's root */
@@ -655,9 +655,22 @@ static struct {
     int pad_target;
     float since_entry, entry_gap;               /* seconds since a voice entered; the least before the next may */
     float pad_rest, pad_rest_max;               /* Drift seconds with no voice singing; the most such a rest lasts */
-    uint32_t acc;                               /* samples toward the next step */
+    float turn, turn_max;                       /* the pad's turn: real seconds a voice has been up; the most before a recess */
+    float recess, away;                         /* real seconds of the recess left at its bottom; seconds with no voice heard */
+    float dip, dip_depth;                       /* the recess: dB on the pad's gain (0: none); this one's bottom */
+    uint8_t recessing;                          /* 0 a turn, 1 going down or at the bottom, 2 coming back */
+    uint32_t acc;                              /* samples toward the next step */
 } cd;
-static float ground_db = -60.0f, ground_lin;    /* the Ground layer's level */
+/* the pad's turn and recess (the note above pad_count) */
+static float pad_turn_lo = 75.0f, pad_turn_span = 135.0f;      /* a turn: 75-210 s with a voice up */
+static float pad_recess_lo = 20.0f, pad_recess_span = 50.0f;   /* a recess: 20-70 s at its bottom */
+#define PAD_DIP_FALL 0.1f                       /* dB/s: the ebb's own pace down */
+#define PAD_DIP_RISE 0.12f                      /* and back a little quicker (a voice's 0.4 and the gains' 0.16 beside it;
+                                                 * at 0.15 one take read 1.52 dB in 2 s against the swell limit's 1.5) */
+#define PAD_CARRY (150.0f + 150.0f * frand())   /* the pad alone while the bass rests: 2.5-5 minutes, then the bass returns */
+#define PAD_TURN (pad_turn_lo + pad_turn_span * frand())
+#define PAD_RECESS (pad_recess_lo + pad_recess_span * frand())
+static float ground_db = -60.0f, ground_lin;   /* the Ground layer's level */
 static uint8_t ground_on;
 static float ground_gap;                        /* seconds before Ground may enter again; its stay */
 static float ground_stay;
@@ -692,9 +705,10 @@ static void pad_enter(pad_t *v, int i)          /* a voice enters: from the floo
      * and the make-up answer the same deficit, so the voice's own share of it is small (Phase 3: 0.8 per dB) */
     v->base_db = fm_clampf(-6.0f + 4.0f * frand() + 0.4f * fm_clampf(cd.target + cd.ebb20 - cd.level20, -4.0f, 4.0f), -14.0f, 0.0f);
     v->stay = 60.0f + 240.0f * frand();
-    v->rise = 0.4f;                             /* with the governor's 0.16 dB/s this stays under the swell limit;
+    v->rise = 0.36f;                            /* (0.4 until 2026-11-13: v1's take read 1.48 dB in 2 s against the limit's 1.5
+                                                 * and two takes with the pad's turn 1.50; a tenth slower for the margin)
+                                                 * with the governor's 0.16 dB/s this stays under the swell limit;
                                                  * the opening (play from silence) is quicker */
-    v->fall = 0.2f + 0.1f * frand();            /* dissolving: 1.3 to 2 times slower than it came */
     {   /* from -45 dB after the gains: with the trim and the make-up at +15 dB in a thin stretch, a voice appearing at -45
          * before them was a step the ear and the swell check both caught (2026-11-09, at a pause in the 8 h render) */
         /* Phase 5b: from -52. In a take where the pad sat 5 dB lower than usual (its median -50 dB), a lone voice
@@ -1973,6 +1987,9 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     cd.entry_gap = 10.0f;
     cd.pad_rest = 0.0f;
     cd.pad_rest_max = 240.0f + 360.0f * frand();
+    cd.turn = cd.away = cd.recess = cd.dip = cd.dip_depth = 0.0f;
+    cd.turn_max = PAD_TURN;
+    cd.recessing = 0;
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         /* deeper swings at the same speed (Tomorrow's Man, TESTING #11): sd x1.25, tau x1.56 keeps dB/s where it was */
@@ -2025,6 +2042,37 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     fld.dwell = FLD_DWELL;
     field_home();
 }
+
+/* The pad's turn (2026-11-13, after v1; Tomorrow's Man: "the way the pad can take over sometimes for a very long time is really
+ * the only thing left that gets distracting", it should not drone on "for more than a minute at a time", and the
+ * pieces should open up, with "more breathing room (i.e., lower amplitude/volume)"). Measured on the v1 take (Samsara,
+ * seed 1107, 8 h): a voice is singing 90% of the time, in stretches of up to 27 minutes, its rests 23 s at the median,
+ * the loudest voice within 20 dB of full for up to 23 minutes at a stretch; and the six longest stretches with the pad
+ * over 70% of the energy (10-15 minutes each) are the bass's six longest rests, when the foundation rule keeps a voice
+ * up and hands it on voice to voice. So, as the bells' passages and the whole garden's ebbs are, the pad's presence
+ * is bounded by a timer: once a voice has been up (within 15 dB of full), or the pad has led from lower down, for
+ * PAD_TURN real seconds, the pad takes a recess: the layer's own ebb. cd.dip (dB on the pad's gain, its own slews,
+ * as cd.ebb is on every layer's) falls at PAD_DIP_FALL to PAD_DIP under where the pad was (less when the pad is the
+ * one sustained layer: something always burbles), stays PAD_RECESS seconds, and returns at PAD_DIP_RISE; then a new
+ * turn is drawn. At the bottom the voice nearest the end of its stay is let go, so what returns is not quite what
+ * left. The voices live on underneath, so the foundation and the hand-over are as they were. The bass's rest is
+ * bounded by it: when the bass leaves, the pad is given a fresh turn of PAD_CARRY to carry the garden alone; at
+ * its end the bass is called back, and once it is up the pad takes its recess. The bass does not begin a rest
+ * during a recess.
+ * (A first build made the recess a rest: every voice out, the bass called back if it was resting. Two 8 h takes: the
+ * bass never rested again (0.2-2% of the time; 15% in v1) and led for 44 and 78 minutes at a stretch, the pad's share
+ * fell from 48% to 13-23%, and a pad that returns from nothing each time moved its level faster than the swell limit.
+ * One takeover for another.) Real seconds: a turn is heard in real time. At Hold nothing of it moves. */
+#ifdef EN_HOST
+void en_host_pad_turn(float lo, float hi, float rlo, float rhi)   /* an A/B; lo <= 0: no turns (v1's pad) */
+{
+    pad_turn_lo = lo <= 0.0f ? 1e9f : lo;
+    pad_turn_span = fm_maxf(hi - lo, 0.0f);
+    pad_recess_lo = rlo;
+    pad_recess_span = fm_maxf(rhi - rlo, 0.0f);
+    cd.turn_max = PAD_TURN;
+}
+#endif
 
 static int pad_count(void)                      /* voices singing (not dissolving) */
 {
@@ -2132,7 +2180,7 @@ static void governor_step(float dt)
      * once the mix is back inside (as a cut does), so it is lent, not kept. */
     if (err > 1.5f)
         cd.trim = fm_maxf(cd.trim - fm_minf(err * (1.0f / 3.0f), 1.0f) * 0.15f * dt, -12.0f);   /* its full rate from 3 dB over (was 6) */
-    else if (err < -6.0f)
+    else if (err < -6.0f && cd.dip > -3.0f)     /* (not into the pad's recess: the quiet is meant) */
         cd.trim = fm_minf(cd.trim + fm_minf((-6.0f - err) * (1.0f / 6.0f) + 0.2f, 1.0f) * 0.06f * dt, 6.0f);
     else {                                      /* inside: back toward 0, either way */
         /* Phase 5c: a lift is handed back as the garden returns. Once the mix is within 3 dB of its target again (the
@@ -2213,7 +2261,8 @@ static void governor_step(float dt)
                          0.16f, 0.16f, dt);    /* the bells are struck notes: the governor never lifts them (Phase 4: at most
                                                 * 3 dB, and it sat there; before that +9 to +15 in a thin garden, Tomorrow's Man's loud
                                                 * lone bells), it turns them down with the mix, and by their company */
-        cd.g[k] = fm_db2lin(cd.gdb[k] + cd.ebb);   /* Phase 5c: and the ebb, on its own slews */
+        cd.g[k] = fm_db2lin(cd.gdb[k] + cd.ebb + (k == L_PAD ? cd.dip : 0.0f));   /* Phase 5c: and the ebb, on its own slews;
+                                                 * 2026-11-13: and the pad's recess */
     }
     if (cd.share[L_PAD] > cap + 0.05f && cd.lead[L_PAD] > 120.0f)
         cd.pad_thin = 1;                        /* (never with fewer than three layers sounding: cap is 2) */
@@ -2305,6 +2354,62 @@ static void pad_step(float dt)
  * a bed, Tomorrow's Man's TESTING #7). The bass's share is reported, not tuned: Tomorrow's Man calls it the foundation.) */
     if (want_n < 0)
         want_n = 0;
+    /* the pad's turn and its recess (the note above pad_count) */
+    if (en_playing && cd.speed > 0.0f && cd.opening <= 0.0f) {
+        int up = 0, heard = 0;
+        float want_dip = 0.0f;
+        for (i = 0; i < EN_NPAD; i++) {
+            up |= pad[i].st == PV_ON && pad[i].ldb > -15.0f;
+            heard |= pad[i].st != PV_OFF && pad[i].ldb > -30.0f;
+        }
+        cd.away = heard ? 0.0f : cd.away + dt;
+        if (!cd.recessing) {
+            if (up || (heard && cd.share[L_PAD] > 0.5f))   /* up, or leading from lower down (the bass away, the voices
+                                                 * passing the foundation hand to hand at -16 to -30 dB: 98% of the energy) */
+                cd.turn += dt;
+            else if (cd.away > 20.0f && cd.turn > 0.0f) {   /* it went by itself: the next turn is a new one */
+                cd.turn = 0.0f;
+                cd.turn_max = PAD_TURN;
+            }
+            if (cd.turn > cd.turn_max) {
+                /* the pad alone, the bass resting: the bass is called back (bass_step returns it) and the recess waits
+                 * until it is up, a minute and a half. With a shallow recess instead (6-8 dB, the bass left to finish
+                 * its rest) two takes kept the pad over 70% of the energy for 15 minutes at a stretch, as v1 did */
+                if (bass_vol > 0.0f && (bass.rest || bass.ldb < -20.0f)) {
+                    if (bass.rest)
+                        bass.rest_t = bass.gap;
+                } else {
+                    cd.recessing = 1;
+                    cd.recess = PAD_RECESS;
+                    cd.dip_depth = cd.floor_hold > 0.0f ? 6.0f + 2.0f * frand()   /* a piece without a bass, its bells away:
+                                                                                   * the one layer sounding, not as far */
+                                                        : 10.0f + 5.0f * frand();
+                }
+            }
+        }
+        if (cd.recessing == 1) {
+            want_dip = -cd.dip_depth;
+            if (cd.dip <= want_dip + 1.0f) {    /* at the bottom */
+                if (cd.recess > 0.0f && cd.recess - dt <= 0.0f) {
+                    int best = -1;              /* the voice nearest the end of its stay is let go */
+                    for (i = 0; i < EN_NPAD; i++)
+                        if (pad[i].st == PV_ON && (best < 0 || pad[i].stay < pad[best].stay))
+                            best = i;
+                    if (best >= 0 && pad_count() > 1)
+                        pad[best].stay = 0.0f;
+                }
+                cd.recess -= dt;
+            }
+            if (cd.recess <= 0.0f)
+                cd.recessing = 2;               /* on the way back */
+        }
+        if (cd.recessing == 2 && cd.dip > -0.5f) {
+            cd.recessing = 0;
+            cd.turn = 0.0f;
+            cd.turn_max = PAD_TURN;
+        }
+        cd.dip = slew(cd.dip, want_dip, PAD_DIP_RISE, PAD_DIP_FALL, dt);
+    }
     if (!en_playing || cd.speed <= 0.0f)
         want_n = pad_count();                   /* resting, or Hold: no entrances, no leaves */
     if (want_n > SHED_NPAD[shed])
@@ -2348,7 +2453,10 @@ static void pad_step(float dt)
         /* (Phase 5b: a voice rising in another's shadow, 20 dB or more under the loudest, comes up at 2 dB/s: it is a
          * hundredth of the pad's energy there, so the pad's level does not move with it, and the minute and a half an
          * entrance from -52 dB took before it could be heard is a quarter of that) */
-        v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f || (v->st == PV_ON && v->ldb < top - 20.0f) ? 2.0f : v->rise,
+        /* (2026-11-13: while the pad's recess is coming back the voice's own rise is less by the recess's, so the two
+         * together are the 0.4 dB/s the rate budget was written for; summed, a take read 1.58 dB in 2 s against 1.5) */
+        v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f || (v->st == PV_ON && v->ldb < top - 20.0f) ? 2.0f
+                                   : cd.recessing == 2 ? v->rise - PAD_DIP_RISE : v->rise,
                       v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : fm_maxf(v->fall, SHED_FALL[shed]), dt);
         v->crest = fm_clampf((v->ldb - v->tilt - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
         if (v->st == PV_OUT && v->ldb <= -50.0f) {
@@ -2437,10 +2545,12 @@ static void bass_step(float dt)
                 cd.floor_hold = fm_maxf(cd.floor_hold, 30.0f);   /* Phase 5, the foundation's hand-over: the bass waits for
                                                  * a pad voice to be up (within 15 dB of full) before it leaves, and asks for
                                                  * one; leaving first left a minute or two of bells alone, 17 dB under */
-            } else if (cd.pres[L_BASS].x < 0.3f && bass.stay_t >= bass.min_stay &&
+            } else if (cd.pres[L_BASS].x < 0.3f && bass.stay_t >= bass.min_stay && !cd.recessing &&
                        !(bell_vol > 0.0f && (bells.rest || bells.ldb < -20.0f))) {
                 bass.rest = 1;
                 bass.rest_t = 0.0f;
+                cd.turn = 0.0f;                 /* 2026-11-13: the pad carries the garden for one turn (the note above pad_count) */
+                cd.turn_max = PAD_CARRY;
                 bass.gap = 120.0f + 180.0f * frand();
                 cd.ff_e0[L_BASS] = cd.e20[L_BASS] / fm_maxf(cd.g[L_BASS] * cd.g[L_BASS], 1e-6f);
                 cd.ff_db0[L_BASS] = bass.ldb;
@@ -2655,6 +2765,7 @@ static void conductor_step(void)                /* every CTRL_N samples */
     en_cond[CD_ALONE] = cd.alone;
     en_cond[CD_FIELD_PCS] = (float)rot12(pool, froot);
     en_cond[CD_EBB] = cd.ebb;
+    en_cond[CD_PAD_DIP] = cd.dip;       /* 2026-11-13: the pad's recess, dB */
 }
 
 static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */
