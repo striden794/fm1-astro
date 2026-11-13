@@ -523,6 +523,27 @@ void en_host_pad_life(float breath, float shimmer, float wow, float vib, float c
     pl_vib = vib;
     pl_chorus = chorus;
 }
+/* The pad's voice itself, for an A/B (2026-11-13; Tomorrow's Man, TESTING #53: with shimmer and wow the sine-like voice at 0:14
+ * is well, the Glass voice at 0:28 "just as 'alarming' as before", 8 dB softer too). Host only, 0 by default:
+ * 1: a Glass voice (the modulator an octave up: odd harmonics only, a square's hollow) plays as a Rhodes (ratio 1).
+ * 2: every voice is a wavetable: two to four single cycles (band-limited and levelled by the host, WT_LEN samples
+ *    each), the place between them moved by the shimmer's two slow rates and a little by the crest. */
+#define WT_LEN 2048
+#define WT_MAX 4
+static int pv_mode, wt_n;
+static float wt[WT_MAX][WT_LEN + 1];
+void en_host_pad_voice(int mode) { pv_mode = mode; }
+void en_host_pad_table(int k, const float *t)
+{
+    int j;
+    if (k < 0 || k >= WT_MAX)
+        return;
+    for (j = 0; j < WT_LEN; j++)
+        wt[k][j] = t[j];
+    wt[k][WT_LEN] = t[0];
+    if (k + 1 > wt_n)
+        wt_n = k + 1;
+}
 #endif
 static float pad_gate, pad_gain, pad_vol, bright, swell;
 static float mode_tilt;                        /* Phase 6: how far Bright and Mood lean the mode walker, in mode steps */
@@ -726,6 +747,10 @@ static void pad_note_on(pad_t *v, int i)
         const anchor_t *a = &LAND[land_now][tcur.near];
         v->voices = a->colour;
         v->ratio = a->ratio;
+#ifdef EN_HOST
+        if (pv_mode == 1 && v->ratio == 2.0f)   /* an A/B: no Glass */
+            v->ratio = 1.0f;
+#endif
         v->land = (uint8_t)land_now;
         v->ph[1] = v->ph[0];                    /* the modulator in phase with the carrier */
     }
@@ -3238,6 +3263,10 @@ static void render_pad(uint32_t n)
         const int shim = pl_shimmer > 0.0f;     /* the pad's life: the octave partial on its own phase */
         const float ch = 0.6f * pl_chorus, chn = 1.0f / fm_sqrtf(1.0f + ch * ch);   /* and the second oscillator */
         uint32_t j;
+#ifdef EN_HOST
+        int wa = 0;                             /* the wavetable voice (an A/B): the pair of cycles, and the place between */
+        float wf = 0.0f;
+#endif
         if (amp < 1e-5f && (pad_gain < 1e-4f || v->lin <= 0.0f)) {
             v->amp = 0.0f;
             en_pad_amp[i] = 0.0f;
@@ -3254,8 +3283,35 @@ static void render_pad(uint32_t n)
                 idx = v->idx;                    /* the Rhodes blooms: more overtones as the voice crests (in turns) */
                 h2 = tcur.h2 * v->hk;            /* the cursor's second harmonic and saw (Phase 4); less of it higher up */
                 saw = tcur.saw;
+#ifdef EN_HOST
+                if (pv_mode == 2 && wt_n > 1) {
+                    const float pos = fm_clampf(0.4f + 0.45f * (0.6f * sine(v->lfo[2]) + 0.4f * sine(v->lfo[3]))
+                                                + 0.15f * v->crest, 0.0f, 0.9999f) * (float)(wt_n - 1);
+                    wa = (int)pos;
+                    wf = pos - (float)wa;
+                }
+#endif
             }
-            if (!v->voices) {                    /* FM, the modulator at the anchor's ratio to the carrier (1: a Rhodes) */
+#ifdef EN_HOST
+            if (pv_mode == 2 && wt_n > 1) {
+                const float fp = p0 * (float)WT_LEN;
+                const int k = (int)fp;
+                const float fr = fp - (float)k;
+                const float xa = wt[wa][k] + (wt[wa][k + 1] - wt[wa][k]) * fr;
+                const float xb = wt[wa + 1][k] + (wt[wa + 1][k + 1] - wt[wa + 1][k]) * fr;
+                x = (xa + (xb - xa) * wf) * 1.2f;
+                p0 += v->inc[0];
+                if (p0 >= 1.0f)
+                    p0 -= 1.0f;
+                amp += (tgt - amp) * 0.01f;
+                x *= amp;
+                padl[j] += x * gl;
+                padr[j] += x * gr;
+                padm[j] += x * g;
+                continue;
+            }
+#endif
+            if (!v->voices) {                   /* FM, the modulator at the anchor's ratio to the carrier (1: a Rhodes) */
                 float m = sine(p1) * idx;
                 x = (sine(p0 + m + 1.0f) + h2 * sine(shim ? p2 : 2.0f * p0)) * 1.2f;   /* one carrier: no beating */
                 if (ch > 0.0f) {

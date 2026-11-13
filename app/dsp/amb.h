@@ -184,6 +184,8 @@ extern void (*en_host_meter_hook)(float *plate, float *echo);
  * its pad voice sounds like (the pad's life, an A/B of one moment under several voices) */
 extern void (*en_host_meter_dry)(float *dry, int n);
 void en_host_pad_life(float breath, float shimmer, float wow, float vib, float chorus);   /* the pad's life, each 0 (the engine's) to 1 */
-int en_tap_deg(void);                          /* the chord's scale degree */
+void en_host_pad_voice(int mode);              /* the pad's voice (an A/B): 0 the engine's, 1 Glass as a Rhodes, 2 a wavetable */
+void en_host_pad_table(int k, const float *t); /* its cycle k of up to 4: 2048 samples, band-limited and levelled by the host */
+int en_tap_deg(void);                         /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
 #endif

@@ -916,3 +916,13 @@ that gets distracting". Where the numbers of §11 to §15 differ, these win. All
   --meter-in` records and replays all the governor hears, so a pass plays another's performance note for note
   whatever its pad voice sounds like. It holds for changes of the voice's sound (pitch, colour, the Pad level);
   `pl_breath` changes the conductor's own levels and plays other music from the second minute.
+- **The pad's voice itself, for an A/B (2026-11-13, night)**: Tomorrow's Man, TESTING #53: shimmer and wow mend the sine-like
+  voice at 0:14 of take D and leave the Glass voice at 0:28 "just as 'alarming' as before". Glass (ratio 2) is odd
+  harmonics only, 13 to 16 dB over the even ones: a square's make-up. Host only, under `EN_HOST`, nothing of it in
+  a device build: `pv_mode` 1, a voice that would take ratio 2 takes 1 (`pad_note_on`); `pv_mode` 2, every voice
+  reads a wavetable (`wt[4][2049]`, `render_pad`): two cycles a sample, cross-faded, the place between them from
+  `lfo[2]`, `lfo[3]` and the crest every 32 samples. `en_host_pad_voice(mode)`, `en_host_pad_table(k, t)`; the
+  harness commands `pad_voice noglass | wt | 0` and `pad_table k FILE` (2048 raw floats, the kit's
+  `tools/pad_tables.py`; the command line holds 96 characters, so a short relative path). The engine's default
+  output is unchanged (35 minutes byte for byte). A device build of the wavetable would want shorter cycles in
+  flash; by count it reads two tables a sample where the FM voice reads three.

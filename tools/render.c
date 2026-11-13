@@ -30,6 +30,10 @@
  *                                 Before "play"
  *   pad_life 0 1 0 0 0            host only: the pad's life: breath, shimmer, wow, vibrato, chorus, each 0 (the engine's) to 1
  *                                 (amb.c, at pl_breath). An A/B
+ *   pad_voice noglass             host only: a Glass voice plays as a Rhodes (an A/B)
+ *   pad_table 0 FILE              host only: cycle 0 (of up to 4) of the wavetable pad voice: 2048 raw floats, made by
+ *                                 tools/pad_tables.py of the kit; a short path with no spaces
+ *   pad_voice wt                  host only: every pad voice plays the wavetable (two or more cycles loaded)
  * --dry-out FILE / --dry-in FILE: each layer's own meter energy, recorded or replayed (with --meter-out / --meter-in:
  * the whole of what the governor hears). A pass given both files of another plays that pass's performance note for
  * note whatever its pad voice sounds like: one moment under several voices (the same --csv and --env, which cut the
@@ -388,6 +392,17 @@ static int run_cmd(const char *text, double t)
         float v[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
         sscanf(text, "%*s %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4]);
         en_host_pad_life(v[0], v[1], v[2], v[3], v[4]);
+    } else if (!strcmp(c, "pad_table")) {       /* host only: "pad_table 0 FILE": a single cycle of the wavetable voice */
+        static float t[2048];
+        FILE *fp = n >= 3 ? fopen(b, "rb") : 0;
+        if (!fp || fread(t, sizeof(float), 2048, fp) != 2048) {
+            fprintf(stderr, "render: pad_table K FILE: cannot read 2048 floats from '%s'\n", n >= 3 ? b : "");
+            return 0;
+        }
+        fclose(fp);
+        en_host_pad_table(atoi(a), t);
+    } else if (!strcmp(c, "pad_voice")) {       /* host only: "pad_voice noglass" | "pad_voice wt" | "pad_voice 0" */
+        en_host_pad_voice(n >= 2 && !strcmp(a, "noglass") ? 1 : n >= 2 && !strcmp(a, "wt") ? 2 : 0);
     } else if (!strcmp(c, "plate_wander")) {    /* host only: each half's rate wanders 0.25-1.3 Hz, never periodic */
         en_host_plate_mod(0.0f, 1);
     } else if (!strcmp(c, "mode")) {
