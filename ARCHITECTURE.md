@@ -898,3 +898,7 @@ that gets distracting". Where the numbers of §11 to §15 differ, these win. All
 - **Tests** (`tests/host/amb_test.c`): in 2 h at Drift 50 the pad is never up and undipped for more than 480 s, three
   or more recesses, each back, none deeper than 15 dB. All pass, the simulator scenarios and browser builds too.
 - **Cost**: a few operations a conductor step; nothing per sample. **Not on the FM-1**: the device runs v1 (75b05fa).
+- **The pad's window, for an A/B (2026-11-13, later)**: `pad_lo` 48, `pad_hi` 77 (`pad_retarget`; C3..F5 before the
+  register walker; they were literals). Host only: `en_host_pad_range(lo, hi)`, the harness command `pad_range lo hi`
+  before `piece`; it seats the voices at lo + 2 + 7 i, as the engine seats them at 50 + 7 i. Tomorrow's Man, TESTING #51: the
+  pad's C5 (523 Hz) reads as an alarm. The engine's default output is unchanged.

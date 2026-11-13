@@ -946,13 +946,27 @@ static int bell_note(int l, int off)            /* a loop slot's note, from the 
     return n;
 }
 
+static int pad_lo = 48, pad_hi = 77;            /* the pad's window, C3..F5, moved by the register walker */
+#ifdef EN_HOST
+void en_host_pad_range(int lo, int hi)          /* an A/B (Tomorrow's Man, TESTING #51: the pad's C5, 523 Hz, reads as an alarm) */
+{
+    pad_lo = lo;
+    pad_hi = hi < lo + 12 ? lo + 12 : hi;       /* an octave at the least: every pitch class has a place */
+    {   /* the voices are seated in it as the engine seats them in its own (50 + 7 i: a tone over the floor, in fifths) */
+        int i;
+        for (i = 0; i < EN_NPAD; i++)
+            pad[i].note = pad[i].target = (float)(lo + 2 + 7 * i);
+    }
+}
+#endif
+
 static void pad_retarget(void)                  /* the chord's tones to the four voices */
 {
     int from[4], to[4], i;
     chord_nt = en_chord_tones(pool, froot, deg, chord_pcs);
     for (i = 0; i < EN_NPAD; i++)
         from[i] = (int)(pad[i].target + 0.5f);
-    en_voice_lead(from, chord_pcs, chord_nt, to, 48 + reg_now, 77 + reg_now);
+    en_voice_lead(from, chord_pcs, chord_nt, to, pad_lo + reg_now, pad_hi + reg_now);
     for (i = 0; i < EN_NPAD; i++) {             /* each voice takes its note as it next enters */
         pad[i].target = (float)to[i];
         en_chord[i] = (uint8_t)to[i];

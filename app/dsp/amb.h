@@ -178,6 +178,7 @@ void en_host_pad_turn(float lo, float hi, float rlo, float rhi);   /* the pad's 
                                                 * 75..210 and 20..70); lo <= 0: no turns, v1's pad (an A/B) */
 /* the governor's plate and echo energies each conductor step, to record (the mix pass) or replace (a solo pass):
  * with the muted layers' sends gone the effects return less, and the governor would steer differently */
+void en_host_pad_range(int lo, int hi);        /* the pad's window, MIDI notes before the register walker (the engine's: 48 77) */
 extern void (*en_host_meter_hook)(float *plate, float *echo);
 int en_tap_deg(void);                          /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
