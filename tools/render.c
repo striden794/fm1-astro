@@ -28,6 +28,12 @@
  *                                 "pad_turn 0": no turns, the pad as v1 had it (an A/B). Before "play"
  *   pad_range 48 77               host only: the pad's window, MIDI notes, before the register walker (an A/B).
  *                                 Before "play"
+ *   pad_life 0 1 0 0 0            host only: the pad's life: breath, shimmer, wow, vibrato, chorus, each 0 (the engine's) to 1
+ *                                 (amb.c, at pl_breath). An A/B
+ * --dry-out FILE / --dry-in FILE: each layer's own meter energy, recorded or replayed (with --meter-out / --meter-in:
+ * the whole of what the governor hears). A pass given both files of another plays that pass's performance note for
+ * note whatever its pad voice sounds like: one moment under several voices (the same --csv and --env, which cut the
+ * engine's blocks).
  * --solo mutes the other three layers (en_host_mute: their dry sound and their sends), so a solo render's output
  * is that layer alone with its own echo and reverb, and the four solo renders sum to the mix (up to the output's
  * soft clip). The governor would then hear a thinner garden than in the mix pass and the passes would drift apart
@@ -378,6 +384,10 @@ static int run_cmd(const char *text, double t)
     } else if (!strcmp(c, "pad_range")) {       /* host only: the pad's window, MIDI notes (the engine's: 48 77) */
         if (n >= 3)
             en_host_pad_range(atoi(a), atoi(b));
+    } else if (!strcmp(c, "pad_life")) {        /* host only: breath, shimmer, wow, vibrato */
+        float v[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+        sscanf(text, "%*s %f %f %f %f %f", &v[0], &v[1], &v[2], &v[3], &v[4]);
+        en_host_pad_life(v[0], v[1], v[2], v[3], v[4]);
     } else if (!strcmp(c, "plate_wander")) {    /* host only: each half's rate wanders 0.25-1.3 Hz, never periodic */
         en_host_plate_mod(0.0f, 1);
     } else if (!strcmp(c, "mode")) {
@@ -421,6 +431,17 @@ static double e_l, e_r, pk;                     /* the output this second */
 static double d_acc, last_l, last_r;            /* the output's first difference: its rms frequency (brightness) */
 static FILE *envf;                              /* --env: the 100 ms envelope */
 static FILE *meter_out, *meter_in;              /* --meter-out / --meter-in: the governor's plate and echo energies */
+static FILE *dry_out, *dry_in;                  /* --dry-out / --dry-in: each layer's own */
+static void dry_hook(float *dry, int n)
+{
+    float v[8];
+    if (n > 8)
+        n = 8;
+    if (dry_out)
+        fwrite(dry, sizeof(float), (size_t)n, dry_out);
+    if (dry_in && fread(v, sizeof(float), (size_t)n, dry_in) == (size_t)n)
+        memcpy(dry, v, sizeof(float) * (size_t)n);
+}
 static void meter_hook(float *plate, float *echo)
 {
     float v[2];
@@ -508,13 +529,13 @@ static void usage(void)
 {
     fputs("render --script FILE --seconds N | --hours H [--wav OUT] [--csv OUT] [--events OUT]\n"
           "       [--master 0..4096] [--bits 16|24] [--solo pad|bells|bass|pulse] [--env OUT]\n"
-          "       [--meter-out FILE | --meter-in FILE] [--quiet]\n",
+          "       [--meter-out FILE | --meter-in FILE] [--dry-out FILE | --dry-in FILE] [--quiet]\n",
           stderr);
 }
 
 int main(int argc, char **argv)
 {
-    const char *script = 0, *wavp = 0, *csvp = 0, *evp = 0, *envp = 0, *mop = 0, *mip = 0;
+    const char *script = 0, *wavp = 0, *csvp = 0, *evp = 0, *envp = 0, *mop = 0, *mip = 0, *dop = 0, *dip = 0;
     double seconds = 0.0;
     uint64_t total, next_row;
     int i, ci = 0;
@@ -539,6 +560,10 @@ int main(int argc, char **argv)
             mop = v, i++;
         else if (!strcmp(a, "--meter-in"))
             mip = v, i++;
+        else if (!strcmp(a, "--dry-out"))
+            dop = v, i++;
+        else if (!strcmp(a, "--dry-in"))
+            dip = v, i++;
         else if (!strcmp(a, "--master")) {
             uint32_t m = (uint32_t)atoi(v);
             if (m > 4096u)
@@ -593,6 +618,16 @@ int main(int argc, char **argv)
     }
     if (meter_out || meter_in)
         en_host_meter_hook = meter_hook;
+    if (dop && !(dry_out = fopen(dop, "wb"))) {
+        fprintf(stderr, "render: cannot write %s\n", dop);
+        return 1;
+    }
+    if (dip && !(dry_in = fopen(dip, "rb"))) {
+        fprintf(stderr, "render: cannot read %s\n", dip);
+        return 1;
+    }
+    if (dry_out || dry_in)
+        en_host_meter_dry = dry_hook;
     if (wav)
         wav_header(wav, 0);
     if (csv)
@@ -662,6 +697,10 @@ int main(int argc, char **argv)
         fclose(meter_out);
     if (meter_in)
         fclose(meter_in);
+    if (dry_out)
+        fclose(dry_out);
+    if (dry_in)
+        fclose(dry_in);
     if (!quiet)
         fprintf(stderr, "\nrender: %.0f s of audio%s%s\n", seconds, wavp ? " -> " : "", wavp ? wavp : "");
     return 0;

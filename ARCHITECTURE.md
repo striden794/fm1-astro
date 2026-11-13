@@ -902,3 +902,17 @@ that gets distracting". Where the numbers of §11 to §15 differ, these win. All
   register walker; they were literals). Host only: `en_host_pad_range(lo, hi)`, the harness command `pad_range lo hi`
   before `piece`; it seats the voices at lo + 2 + 7 i, as the engine seats them at 50 + 7 i. Tomorrow's Man, TESTING #51: the
   pad's C5 (523 Hz) reads as an alarm. The engine's default output is unchanged.
+- **The pad's life, for an A/B (2026-11-13, later still)**: Tomorrow's Man, TESTING #52: an octave down "the tone is still
+  'alarming' when it lingers". A voice at its crest is one oscillator at a fixed pitch, its level cut flat by
+  `PAD_TOP`; at 0:14:40 of take D it is a sine with its octave 40 dB under it. Five switches, all 0 by default
+  (`pl_breath`, `pl_shimmer`, `pl_wow`, `pl_vib`, `pl_chorus`; the note above them in `amb.c`): the ceiling on the
+  resting level instead of the walkers' sum; the Rhodes index and the vowel on two slow rates, the modulator and the
+  octave partial a fraction of a hertz off; a tape's wow of 5 cents; a vibrato of 6 cents; a second oscillator
+  1.5-3.5 cents off at 0.6 (the only one with a cost per sample: a table lookup or three more a voice). Host only:
+  `en_host_pad_life(breath, shimmer, wow, vib, chorus)`, the harness command `pad_life`. The engine's default output
+  is unchanged (35 minutes byte for byte against take D).
+- **A performance replayed (the same day)**: `en_host_meter_dry` hands the host each layer's own meter energy, as
+  `en_host_meter_hook` hands it the plate's and the echo's; `render --dry-out / --dry-in` with `--meter-out /
+  --meter-in` records and replays all the governor hears, so a pass plays another's performance note for note
+  whatever its pad voice sounds like. It holds for changes of the voice's sound (pitch, colour, the Pad level);
+  `pl_breath` changes the conductor's own levels and plays other music from the second minute.

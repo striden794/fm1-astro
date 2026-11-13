@@ -180,6 +180,10 @@ void en_host_pad_turn(float lo, float hi, float rlo, float rhi);   /* the pad's 
  * with the muted layers' sends gone the effects return less, and the governor would steer differently */
 void en_host_pad_range(int lo, int hi);        /* the pad's window, MIDI notes before the register walker (the engine's: 48 77) */
 extern void (*en_host_meter_hook)(float *plate, float *echo);
+/* each layer's own energy as well: with both replayed, a pass plays the recorded performance note for note whatever
+ * its pad voice sounds like (the pad's life, an A/B of one moment under several voices) */
+extern void (*en_host_meter_dry)(float *dry, int n);
+void en_host_pad_life(float breath, float shimmer, float wow, float vib, float chorus);   /* the pad's life, each 0 (the engine's) to 1 */
 int en_tap_deg(void);                          /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
 #endif

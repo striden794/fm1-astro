@@ -486,8 +486,44 @@ typedef struct {
     uint8_t voices;                             /* this stay's colour: 0 Rhodes, 1 Voices (the nearest anchor's) */
     uint8_t land;                               /* the landscape the note was taken from (a change hands the voices over) */
     uint8_t st;                                 /* PV_* */
+    float ph2, inc2;                            /* the life (below): the Rhodes's octave partial on its own phase */
+    float ph3, inc3;                            /* the chorus's second oscillator */
+    float lfo[4];                               /* and four slow phases: the wow's two, the colour's two */
 } pad_t;
 static pad_t pad[EN_NPAD];
+/* The pad's life (2026-11-13, after v1; Tomorrow's Man, TESTING #52: an octave down "the tone is still 'alarming' when it
+ * lingers", at 0:28:20 of that take; and of the other, "overwhelmed by the lingering 440Hz tone"). Each of his moments
+ * (those two, #51's and #25's) is one voice alone and up, the loudest thing the ear has: the bass is 100 Hz and
+ * under. And a voice at its crest does not move at all: one oscillator at a fixed pitch (the drift was taken out in
+ * Phase 3: it walked a held note across the plate's resonances), its level cut flat by PAD_TOP, its colour slewed
+ * over minutes. Four ways of giving a held voice a life of its own, each 0 (off, the engine as it is) to 1 and over,
+ * set by the host for an A/B:
+ * breath:  the ceiling cuts the voice's resting level, not its walkers' sum: it touches PAD_TOP at a crest and is
+ *          under it otherwise, where it used to lie on it for a minute.
+ * shimmer: the colour moves inside the note, as a wavetable's position would. Rhodes: the index opens to 1.8 times
+ *          and closes again on two slow rates (periods 11-35 s, never the same twice running); the modulator and the
+ *          octave partial a fraction of a hertz off the carrier's multiples, so the overtones turn against the
+ *          fundamental. Voices: the vowel wanders a quarter of its range on the same rates.
+ * wow:     the pitch on a tape's slow wow, +-5 cents, two rates a voice (0.3-0.9 Hz), no two voices alike.
+ * vib:     a singer's vibrato, +-6 cents at 4.6-5.8 Hz, deeper as the voice crests.
+ * chorus:  a second oscillator 1.5-3.5 cents off the first, at 0.6 of it: the tone beats against itself, the
+ *          overtones faster than the fundamental. The one way of the five that costs the FM-1 time every sample. */
+static float pl_breath, pl_shimmer, pl_wow, pl_vib, pl_chorus;
+static const float LIFE_HZ[4][EN_NPAD] = {{0.31f, 0.43f, 0.37f, 0.47f}, {0.83f, 0.67f, 0.71f, 0.79f},
+                                          {0.071f, 0.053f, 0.089f, 0.061f}, {0.037f, 0.029f, 0.043f, 0.033f}};
+static const float LIFE_OFF[EN_NPAD] = {0.07f, -0.05f, 0.04f, -0.08f};   /* Hz: the octave partial off the octave; the modulator half of it
+                                                                          * (at 2.5 times the index and the whole of it, a Glass voice, ratio 2,
+                                                                          * cancelled its own fundamental every 12 s) */
+#ifdef EN_HOST
+void en_host_pad_life(float breath, float shimmer, float wow, float vib, float chorus)
+{
+    pl_breath = breath;
+    pl_shimmer = shimmer;
+    pl_wow = wow;
+    pl_vib = vib;
+    pl_chorus = chorus;
+}
+#endif
 static float pad_gate, pad_gain, pad_vol, bright, swell;
 static float mode_tilt;                        /* Phase 6: how far Bright and Mood lean the mode walker, in mode steps */
 static float mood_br;                          /* and where Mood puts the center of the weather's brightness (cd.br) */
@@ -813,8 +849,33 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off,
      * its reverb swells or sinks 6-9 dB on its own; and voices drifting apart beat on a chord's coincident
      * harmonics. The tape wow stays where it is heard: on the echo's repeats. */
     f = mtof(v->note);
+    if (pl_shimmer > 0.0f || pl_wow > 0.0f || pl_vib > 0.0f || pl_chorus > 0.0f) {   /* the pad's life (the note at pl_breath) */
+        int k;
+        float cents, col;
+        for (k = 0; k < 4; k++) {
+            v->lfo[k] += LIFE_HZ[k][i] * (32.0f / EN_SR);
+            if (v->lfo[k] >= 1.0f)
+                v->lfo[k] -= 1.0f;
+        }
+        cents = pl_wow * 5.0f * (0.6f * sine(v->lfo[0]) + 0.4f * sine(v->lfo[1]))
+                + pl_vib * 6.0f * (0.3f + 0.7f * v->crest) * sine(v->vib);
+        f *= 1.0f + cents * 0.00057779f;
+        col = pl_shimmer * (0.6f * sine(v->lfo[2]) + 0.4f * sine(v->lfo[3]));
+        v->inc[0] = f * 0.99856f * (1.0f / EN_SR);
+        v->inc3 = v->inc[0] * (1.0f + (i & 1 ? -1.0f : 1.0f) * (2.5f + mod[(i + 1) % NMOD_PAD].v) * 0.00057779f);
+        v->inc[1] = v->inc[0] * v->ratio + pl_shimmer * 0.5f * LIFE_OFF[i] * (1.0f + 0.5f * mod[i].v) * (1.0f / EN_SR);
+        v->inc2 = 2.0f * v->inc[0] - pl_shimmer * 0.6f * LIFE_OFF[i] * (1.0f / EN_SR);
+        b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v
+                      + tcur.vowel + 0.25f * col, 0.0f, 1.0f);
+        v->vowel = slew(v->vowel, b, 0.05f, 0.05f, 32.0f / EN_SR);
+        v->idx = slew(v->idx, ((0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx
+                      * (1.0f + 0.4f * (pl_shimmer + col))
+                      + 0.1f * v->crest * tcur.bloom) * v->hk, 0.05f, 0.05f, 32.0f / EN_SR);
+    } else {
     v->inc[0] = f * 0.99856f * (1.0f / EN_SR);  /* -2.5 cents (AMB-1's pair; its second saw is not played) */
     v->inc[1] = v->inc[0] * v->ratio;           /* FM: the modulator, at the anchor's ratio (Phase 4) */
+    v->inc2 = 2.0f * v->inc[0];
+    v->inc3 = v->inc[0];
     /* the vowel: Bright, the weather's brightness, this voice's offset, its crest, and the tape wobble;
      * it moves at most a fiftieth of its range a second (the formants' gain would otherwise swell) */
     b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v
@@ -823,6 +884,7 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off,
     v->idx = slew(v->idx, ((0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx
                   + 0.1f * v->crest * tcur.bloom) * v->hk, 0.01f, 0.01f, 32.0f / EN_SR);   /* x the cursor's index and bloom,
                                                  * x the note's height (Phase 5c: a high voice is rounder) */
+    }
     vw = v->vowel * 2.999f;
     a = (int)vw;
     vw -= (float)a;
@@ -2113,9 +2175,16 @@ static void governor_step(float dt)
     const float inv = cd.frames ? 1.0f / (2.0f * (float)cd.frames) : 0.0f;
     for (k = 0; k < NLAYERS; k++) {
         dry[k] = cd.e_dry[k] * inv;
+        cd.e_dry[k] = 0.0f;
+    }
+#ifdef EN_HOST
+    if (en_host_meter_dry)
+        en_host_meter_dry(dry, NLAYERS);     /* a whole performance replayed under another pad voice (the pad's life):
+                                              * the layers' own energies too, recorded or replaced */
+#endif
+    for (k = 0; k < NLAYERS; k++) {
         sa += SEND_R[k] * dry[k];
         se += SEND_E[k] * dry[k];
-        cd.e_dry[k] = 0.0f;
     }
     plate = cd.e_plate * inv;
     echo = cd.e_echo * inv;
@@ -2462,7 +2531,8 @@ static void pad_step(float dt)
             float sw = v->lw[0].x + v->lw[1].x + v->lw[2].x;
             if (sw > 0.5f * PAD_CREST)
                 sw = fm_minf(0.5f * PAD_CREST + 0.25f * (sw - 0.5f * PAD_CREST), PAD_CREST);
-            tgt = v->st == PV_ON ? fm_minf(v->base_db + sw, PAD_TOP) + v->tilt : -60.0f;
+            tgt = v->st == PV_ON ? fm_minf((pl_breath > 0.0f ? fm_minf(v->base_db, PAD_TOP - PAD_CREST) : v->base_db) + sw, PAD_TOP)
+                                   + v->tilt : -60.0f;   /* (breath: the note at pl_breath) */
         }
         /* (Phase 5b: a voice rising in another's shadow, 20 dB or more under the loudest, comes up at 2 dB/s: it is a
          * hundredth of the pad's energy there, so the pad's level does not move with it, and the minute and a half an
@@ -2866,6 +2936,13 @@ void en_init(void)
         pad[i].st = PV_OFF;
         pad[i].ph[0] = 0.0f;
         pad[i].ph[1] = 0.37f;
+        pad[i].ph2 = pad[i].inc2 = 0.0f;
+        pad[i].ph3 = 0.41f;
+        pad[i].inc3 = 0.0f;
+        pad[i].lfo[3] = 0.17f * (float)i;
+        pad[i].lfo[0] = 0.21f * (float)i;
+        pad[i].lfo[1] = 0.13f * (float)i;
+        pad[i].lfo[2] = 0.29f * (float)i;
         pad[i].vib = 0.3f * (float)i;
         pad[i].midi_note = 0;
         pad[i].hf = 1.0f;
@@ -3063,6 +3140,7 @@ static void plate_wander_step(uint32_t n)       /* once a chunk: each oscillator
 #ifdef EN_HOST
 static uint8_t host_mute[NLAYERS];
 void (*en_host_meter_hook)(float *plate, float *echo);   /* the governor's plate and echo energies, recorded or replayed */
+void (*en_host_meter_dry)(float *dry, int n);            /* and each layer's own (see governor_step) */
 void en_host_plate_exc(float k) { pl_exc_k = fm_clampf(k, 0.0f, 1.0f); }
 void en_host_plate_mod(float rate_hz, int wander)
 {
@@ -3156,7 +3234,9 @@ static void render_pad(uint32_t n)
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         float p0 = v->ph[0], p1 = v->ph[1], amp = v->amp, s0 = v->ic[0], s1 = v->ic[1], s2 = v->ic[2], s3 = v->ic[3],
-              gl, gr, pn, tgt = 0.0f, idx = 0.0f, h2 = 0.12f, saw = 0.45f;
+              gl, gr, pn, tgt = 0.0f, idx = 0.0f, h2 = 0.12f, saw = 0.45f, p2 = v->ph2, p3 = v->ph3;
+        const int shim = pl_shimmer > 0.0f;     /* the pad's life: the octave partial on its own phase */
+        const float ch = 0.6f * pl_chorus, chn = 1.0f / fm_sqrtf(1.0f + ch * ch);   /* and the second oscillator */
         uint32_t j;
         if (amp < 1e-5f && (pad_gain < 1e-4f || v->lin <= 0.0f)) {
             v->amp = 0.0f;
@@ -3177,10 +3257,19 @@ static void render_pad(uint32_t n)
             }
             if (!v->voices) {                    /* FM, the modulator at the anchor's ratio to the carrier (1: a Rhodes) */
                 float m = sine(p1) * idx;
-                x = (sine(p0 + m + 1.0f) + h2 * sine(2.0f * p0)) * 1.2f;   /* one carrier: no beating */
+                x = (sine(p0 + m + 1.0f) + h2 * sine(shim ? p2 : 2.0f * p0)) * 1.2f;   /* one carrier: no beating */
+                if (ch > 0.0f) {
+                    x = ((sine(p0 + m + 1.0f) + ch * sine(p3 + m + 1.0f)) * chn + h2 * sine(shim ? p2 : 2.0f * p0)) * 1.2f;
+                    p3 += v->inc3;
+                    if (p3 >= 1.0f)
+                        p3 -= 1.0f;
+                }
                 p0 += v->inc[0];
                 if (p0 >= 1.0f)
                     p0 -= 1.0f;
+                p2 += v->inc2;
+                if (p2 >= 1.0f)
+                    p2 -= 1.0f;
                 p1 += v->inc[1];
                 if (p1 >= 1.0f)
                     p1 -= 1.0f;
@@ -3193,6 +3282,13 @@ static void render_pad(uint32_t n)
             }
             /* as Discreet Music's Synthi: a mellow triangle (a sine's neighbour), a little saw in it */
             x = (p0 < 0.5f ? 4.0f * p0 - 1.0f : 3.0f - 4.0f * p0) * 1.4f + saw * blep_saw(p0, v->inc[0]) + 0.6f * sine(p0);
+            if (ch > 0.0f) {
+                x = (x + ch * ((p3 < 0.5f ? 4.0f * p3 - 1.0f : 3.0f - 4.0f * p3) * 1.4f + saw * blep_saw(p3, v->inc3)
+                               + 0.6f * sine(p3))) * chn;
+                p3 += v->inc3;
+                if (p3 >= 1.0f)
+                    p3 -= 1.0f;
+            }
             p0 += v->inc[0];
             if (p0 >= 1.0f)
                 p0 -= 1.0f;
@@ -3222,6 +3318,8 @@ static void render_pad(uint32_t n)
         v->amp = amp;
         v->ph[0] = p0;
         v->ph[1] = p1;
+        v->ph2 = p2;
+        v->ph3 = p3;
         en_pad_note[i] = (uint8_t)v->note;
         en_pad_amp[i] = amp;
         lvl = fm_maxf(lvl, amp);
