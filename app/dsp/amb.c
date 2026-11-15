@@ -47,7 +47,7 @@ static const en_param_t PARAMS[P_NPARAMS] = {
     {"Echo", 0, 100, 45},     {"Echo time", 0, 5, 3},   {"Reverb", 0, 100, 65},   {"Size", 0, 100, 80},
     {"Bright", 0, 100, 40},   {"Swell", 0, 100, 60},    {"Bell tone", 0, 100, 50}, {"Motion", 0, 100, 50},
     {"Tune", -50, 50, 0},     {"MIDI out", 0, 1, 1},    {"Tempo", 30, 120, 72},   {"Root", 0, 11, 2},
-    {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 1, 0},
+    {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 2, 0},
     {"Bass oct", -1, 1, 0},   {"Glide", 0, 100, 20},    {"Fifth", 0, 100, 35},
     {"Swing", 0, 100, 0},     {"Hats", 0, 100, 50},
     {"Mood", -50, 50, 0},     {"Space", -50, 50, 0},
@@ -60,7 +60,7 @@ const en_param_t *en_param_info(int i) { return (i >= 0 && i < P_NPARAMS) ? &PAR
  * Swell = how far the pad voices breathe; Hits, Swing, Hats: unused (the pulse is not played). Mood and Space
  * (Phase 6) are the player's offsets around a recipe and are 0 in every one (the initialisers end before them). */
 /*                     Pad Bel Bas Pul  Den Evo Dri Hit  Ech ET Rev Siz  Bri Swe Ton Mot  Tun MI Tem Rt Md Oc  PT  BO Gli Fif  Swi Hat
- * (PT: the pad's colour, 0 Rhodes, 1 Voices; BO: the bass's octave) */
+ * (PT: the pad's colour, 0 Rhodes, 1 Voices, 2 Choir; BO: the bass's octave) */
 static const struct {
     const char *name;
     int8_t v[P_NPARAMS];
@@ -69,11 +69,12 @@ static const struct {
      * Samsara is Garden's row unchanged (the piece every phase was tuned and judged on); Maranasati is Tides'
      * (Phase 6c, 2026-11-11: of AMB-1's four unused recipes the one that measured most balanced and moving in this
      * engine, out/phase6c/compare.md; it was Voices' with the Ground let in); Anatta is Afternoon's; Nirvana is
-     * Shoreline's. */
-    {"Samsara",      {60, 65, 45, 40, 40, 35, 25, 35, 45, 3, 65, 80, 40, 60, 50, 50, 0, 1, 72, 2, 1, 0, 0, 0, 20, 35, 0, 50}},
+     * Shoreline's. 2026-11-14 (Tomorrow's Man, TESTING #57: "Can the choir be the pad in Samsara and Nirvana?"): their pad's
+     * colour is the Choir (PT 2; both were Rhodes). */
+    {"Samsara",      {60, 65, 45, 40, 40, 35, 25, 35, 45, 3, 65, 80, 40, 60, 50, 50, 0, 1, 72, 2, 1, 0, 2, 0, 20, 35, 0, 50}},
     {"Maranasati",   {55, 60, 40, 35, 45, 75, 10, 40, 50, 3, 65, 85, 60, 60, 55, 95, 0, 1, 70, 10, 4, 0, 1, 0, 25, 55, 10, 50}},
     {"Anatta",       {50, 65, 35, 25, 55, 45, 20, 30, 50, 2, 60, 75, 60, 50, 60, 55, 0, 1, 84, 7, 3, 0, 0, 0, 15, 40, 15, 65}},
-    {"Nirvana",      {40, 60, 30, 0, 30, 40, 40, 0, 85, 4, 55, 95, 30, 80, 0, 85, 0, 1, 64, 4, 6, 0, 0, 0, 40, 20, 0, 30}},
+    {"Nirvana",      {40, 60, 30, 0, 30, 40, 40, 0, 85, 4, 55, 95, 30, 80, 0, 85, 0, 1, 64, 4, 6, 0, 2, 0, 40, 20, 0, 30}},
 };
 
 const char *en_piece_name(int i) { return PIECES[(unsigned)i < EN_NPIECES ? i : 0].name; }
@@ -119,7 +120,7 @@ void en_param_text(int i, int v, char *b)
     else if (i == P_MIDI)
         s = ONOFF[v ? 1 : 0];
     else if (i == P_PADTONE)
-        s = v ? "Voices" : "Rhodes";
+        s = v == 2 ? "Choir" : v ? "Voices" : "Rhodes";
     else if (i == P_MODE)
         s = EN_MODE_NAME[(unsigned)v < EN_NMODES ? v : 0];
     else if (i == P_ROOT)
@@ -381,6 +382,20 @@ static float mtof(float n) { return 440.0f * tunefac * fm_exp2f((n - 69.0f) * (1
 /* a sine table: 1024 points a turn, plus one */
 #define SN 1024
 static float sint[SN + 1];
+/* The Choir (2026-11-14, after v1; Tomorrow's Man, TESTING #54: "a slight buzz that is reminiscent of Brian Eno's classic pieces,
+ * such as I Dormienti"; #57: the pad in Samsara and Nirvana). A third colour of the pad beside the Rhodes and the
+ * Voices: every voice reads a wavetable of three single cycles (choir.h: harmonics 1 to 32 of three sung vowels,
+ * each harmonic a sine in phase, so a cross-fade never cancels one), the place between them moving on two slow rates
+ * (periods 11-35 s) and a little with the crest. The cycles are built here at start, CHOIR_LEN samples each (read
+ * with linear interpolation: 72 dB or more under the cycle). With it: the pad an octave down (pad_window: TESTING #52),
+ * and a tape's wow of 1 cent (CHOIR_WOW of the life's 5: at 5 the held note walks across the plate's resonances and
+ * the pad's level moves 1.3 dB/s against the swell limit's 1.0; at 1 cent 0.74; he hears no difference, TESTING #57).
+ * By count the voice reads two cycles a sample where the FM voice reads the sine table three times. */
+#include "choir.h"
+#define CHOIR_LEN 1024
+#define CHOIR_WOW 0.2f
+static float choir_t[CHOIR_NCYC][CHOIR_LEN + 1] EN_POOL;
+static uint8_t choir_on;                        /* the pad's colour is the Choir (P_PADTONE 2) */
 static inline float sine(float ph)              /* ph in turns, any value >= 0 */
 {
     float x = (ph - (float)(int)ph) * (float)SN;
@@ -484,7 +499,7 @@ typedef struct {
     float ratio;                                /* FM: the modulator's ratio to the carrier, the nearest anchor's as the note started */
     float hf;                                   /* a handoff's fade: 1 normal */
     uint8_t midi_note, hand;                    /* hand: 1 fading out of the old key, 2 into the new */
-    uint8_t voices;                             /* this stay's colour: 0 Rhodes, 1 Voices (the nearest anchor's) */
+    uint8_t voices;                             /* this stay's colour: 0 Rhodes, 1 Voices (the nearest anchor's), 2 Choir */
     uint8_t land;                               /* the landscape the note was taken from (a change hands the voices over) */
     uint8_t st;                                 /* PV_* */
     float ph2, inc2;                            /* the life (below): the Rhodes's octave partial on its own phase */
@@ -734,9 +749,11 @@ static float pad_recess_lo = 20.0f, pad_recess_span = 50.0f;   /* a recess: 20-7
 #define PAD_CARRY (150.0f + 150.0f * frand())   /* the pad alone while the bass rests: 2.5-5 minutes, then the bass returns */
 #define PAD_TURN (pad_turn_lo + pad_turn_span * frand())
 #define PAD_RECESS (pad_recess_lo + pad_recess_span * frand())
-/* the pad's company (the note above ear_w): off unless the harness sets it */
-static float pc_line = 3.0f, pc_most, pc_call;  /* dB over its company a pad may stand; the most the hold takes (0: no hold);
-                                                 * real seconds alone before the bells are called (0: never) */
+/* the pad's company (the note above ear_w) */
+static float pc_line = 3.0f, pc_most = 14.0f, pc_call = 20.0f;   /* dB over its company a pad may stand; the most the hold
+                                                 * takes (0: no hold); real seconds alone before the bells are called (0: never).
+                                                 * The engine's since 2026-11-14 (Tomorrow's Man, TESTING #56: "the 'alarm' does not seem
+                                                 * to be there any longer"; "I do think you have nailed it") */
 #define PC_FALL 0.25f                           /* dB/s: the hold comes on a little slower than a voice rises (0.36) */
 #define PC_RISE 0.1f                            /* and is given back at the recess's pace */
 static float ground_db = -60.0f, ground_lin;   /* the Ground layer's level */
@@ -757,13 +774,13 @@ static void pad_note_on(pad_t *v, int i)
     pad_height(v);
     {   /* the discrete set: the nearest anchor's colour and ratio, as the note starts (DESIGN section 4) */
         const anchor_t *a = &LAND[land_now][tcur.near];
-        v->voices = a->colour;
+        v->voices = choir_on ? 2 : a->colour;
         v->ratio = a->ratio;
 #ifdef EN_HOST
         if (pv_mode == 1 && v->ratio == 2.0f)   /* an A/B: no Glass */
             v->ratio = 1.0f;
 #endif
-        v->land = (uint8_t)land_now;
+        v->land = (uint8_t)(choir_on ? NLAND : land_now);
         v->ph[1] = v->ph[0];                    /* the modulator in phase with the carrier */
     }
     v->midi_note = (uint8_t)v->target;
@@ -823,7 +840,7 @@ static void pad_handoff(void)
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         if (v->st != PV_OFF && v->amp > 0.002f &&
-            ((float)v->midi_note != v->target || v->land != (uint8_t)land_now))
+            ((float)v->midi_note != v->target || v->land != (uint8_t)(choir_on ? NLAND : land_now)))
             v->hand = 1;                        /* singing: crosses over; dissolving: goes out with the old key */
         else if (v->st == PV_OFF && !v->hand)
             v->note = v->target;
@@ -886,7 +903,10 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off,
      * its reverb swells or sinks 6-9 dB on its own; and voices drifting apart beat on a chord's coincident
      * harmonics. The tape wow stays where it is heard: on the echo's repeats. */
     f = mtof(v->note);
-    if (pl_shimmer > 0.0f || pl_wow > 0.0f || pl_vib > 0.0f || pl_chorus > 0.0f) {   /* the pad's life (the note at pl_breath) */
+    /* (the Choir: the place between its cycles moves on the shimmer's rates, and a little wow) */
+    const float pl_sh = v->voices == 2 ? fm_maxf(pl_shimmer, 1.0f) : pl_shimmer;
+    const float pl_ww = v->voices == 2 && pl_wow <= 0.0f ? CHOIR_WOW : pl_wow;
+    if (pl_sh > 0.0f || pl_ww > 0.0f || pl_vib > 0.0f || pl_chorus > 0.0f) {   /* the pad's life (the note at pl_breath) */
         int k;
         float cents, col;
         for (k = 0; k < 4; k++) {
@@ -894,19 +914,19 @@ static void pad_coefs(pad_t *v, int i)          /* every 32 samples: a hand-off,
             if (v->lfo[k] >= 1.0f)
                 v->lfo[k] -= 1.0f;
         }
-        cents = pl_wow * 5.0f * (0.6f * sine(v->lfo[0]) + 0.4f * sine(v->lfo[1]))
+        cents = pl_ww * 5.0f * (0.6f * sine(v->lfo[0]) + 0.4f * sine(v->lfo[1]))
                 + pl_vib * 6.0f * (0.3f + 0.7f * v->crest) * sine(v->vib);
         f *= 1.0f + cents * 0.00057779f;
-        col = pl_shimmer * (0.6f * sine(v->lfo[2]) + 0.4f * sine(v->lfo[3]));
+        col = pl_sh * (0.6f * sine(v->lfo[2]) + 0.4f * sine(v->lfo[3]));
         v->inc[0] = f * 0.99856f * (1.0f / EN_SR);
         v->inc3 = v->inc[0] * (1.0f + (i & 1 ? -1.0f : 1.0f) * (2.5f + mod[(i + 1) % NMOD_PAD].v) * 0.00057779f);
-        v->inc[1] = v->inc[0] * v->ratio + pl_shimmer * 0.5f * LIFE_OFF[i] * (1.0f + 0.5f * mod[i].v) * (1.0f / EN_SR);
-        v->inc2 = 2.0f * v->inc[0] - pl_shimmer * 0.6f * LIFE_OFF[i] * (1.0f / EN_SR);
+        v->inc[1] = v->inc[0] * v->ratio + pl_sh * 0.5f * LIFE_OFF[i] * (1.0f + 0.5f * mod[i].v) * (1.0f / EN_SR);
+        v->inc2 = 2.0f * v->inc[0] - pl_sh * 0.6f * LIFE_OFF[i] * (1.0f / EN_SR);
         b = fm_clampf(bright * 0.01f + 0.5f * cd.br + v->bw.x + 0.15f * v->crest + 0.1f * motion * mod[(i + 2) % NMOD_PAD].v
                       + tcur.vowel + 0.25f * col, 0.0f, 1.0f);
         v->vowel = slew(v->vowel, b, 0.05f, 0.05f, 32.0f / EN_SR);
         v->idx = slew(v->idx, ((0.04f + 0.1f * fm_clampf(bright * 0.01f + 0.6f * cd.br + v->bw.x, 0.0f, 1.0f)) * tcur.idx
-                      * (1.0f + 0.4f * (pl_shimmer + col))
+                      * (1.0f + 0.4f * (pl_sh + col))
                       + 0.1f * v->crest * tcur.bloom) * v->hk, 0.05f, 0.05f, 32.0f / EN_SR);
     } else {
     v->inc[0] = f * 0.99856f * (1.0f / EN_SR);  /* -2.5 cents (AMB-1's pair; its second saw is not played) */
@@ -1046,9 +1066,28 @@ static int bell_note(int l, int off)            /* a loop slot's note, from the 
 }
 
 static int pad_lo = 48, pad_hi = 77;            /* the pad's window, C3..F5, moved by the register walker */
+static uint8_t pad_range_host;                  /* the harness set the window: the colour leaves it alone */
+/* the colour's window: the Choir sings an octave down, C2..F4 (Tomorrow's Man, TESTING #52: "the superior render overall"). When
+ * the window moves the voices are seated in it afresh (a tone over the floor, in fifths), as at start: led from where
+ * they were they would stay in the top of the new one. They take the notes as they next enter or hand over. */
+static void pad_window(void)
+{
+    const int lo = choir_on ? 36 : 48;
+    int i;
+    if (pad_range_host || lo == pad_lo)
+        return;
+    pad_lo = lo;
+    pad_hi = lo + 29;
+    for (i = 0; i < EN_NPAD; i++) {
+        pad[i].target = (float)(lo + 2 + 7 * i);
+        if (pad[i].st == PV_OFF)
+            pad[i].note = pad[i].target;
+    }
+}
 #ifdef EN_HOST
 void en_host_pad_range(int lo, int hi)          /* an A/B (Tomorrow's Man, TESTING #51: the pad's C5, 523 Hz, reads as an alarm) */
 {
+    pad_range_host = 1;
     pad_lo = lo;
     pad_hi = hi < lo + 12 ? lo + 12 : hi;       /* an octave at the least: every pitch class has a place */
     {   /* the voices are seated in it as the engine seats them in its own (50 + 7 i: a tone over the floor, in fifths) */
@@ -1978,8 +2017,15 @@ static void apply(int p, int v)
     case P_EVOLVE: evolve = (float)v * 0.01f; break;
     case P_BTONE: btone = (float)v * 0.01f; break;
     case P_PADTONE:                              /* the landscape: the voices cross over as they did for a new key */
-        land_now = v < NLAND ? v : NLAND - 1;
+        choir_on = v == 2;                       /* the Choir keeps the Rhodes landscape's cursor (the pad bus's filter) */
+        land_now = choir_on ? 0 : v < NLAND ? v : NLAND - 1;
         cursor_blend(1, 0.0f);
+        {
+            const int lo = pad_lo;
+            pad_window();
+            if (lo != pad_lo)
+                pad_retarget();                  /* the chord's tones in the new window */
+        }
         pad_handoff();
         break;
     case P_MOTION: motion = (float)v * 0.01f; break;
@@ -2136,7 +2182,9 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     ground_due_at = (40.0f + 30.0f * frand()) * 60.0f;
     reg_now = 0;
     /* the timbre cursor (DESIGN section 4): a season's region, the weather's drift about it; from the center */
-    land_now = par[P_PADTONE] >= 0 && par[P_PADTONE] < NLAND ? par[P_PADTONE] : 0;
+    choir_on = par[P_PADTONE] == 2;
+    land_now = !choir_on && par[P_PADTONE] >= 0 && par[P_PADTONE] < NLAND ? par[P_PADTONE] : 0;
+    pad_window();
     /* (the first 8 h render, 2026-11-09: a season of sd 0.22 within +-0.4 parked in a corner for hours and the weather
      * of sd 0.18 could not leave it, 3 anchors in 8 h; now the season shifts the region a little and the weather
      * does the visiting) */
@@ -2200,10 +2248,10 @@ void en_host_pad_turn(float lo, float hi, float rlo, float rhi)   /* an A/B; lo 
  *  - the pad's gain is held (cd.hold, its own slews, as the recess's cd.dip) so the pad stands at most pc_line dB over
  *    its company, by at most pc_most dB;
  *  - a voice that is up and would stand 3 dB or more over the line for pc_call seconds calls the bells: a rest of
- *    theirs ends, a lull becomes a passage, and they come back at 1 dB/s (struck notes: no swell). His word for the
+ *    theirs ends, a lull becomes a passage, and they come back at 0.8 dB/s (struck notes: no swell). His word for the
  *    pad held down with nothing else there: "a static fade out". Then four minutes before the next call.
  * The hold follows the level the pad would have without it (the meter less the hold as that meter hears it), so it
- * does not chase itself. Real seconds. At Hold nothing of it moves. Off by default (pc_most, pc_call 0). */
+ * does not chase itself. Real seconds. At Hold nothing of it moves. */
 static float ear_w(float note)                  /* the A-curve at a MIDI note, as a weight on energy */
 {
     static const float A[9] = {-55.8f, -38.7f, -25.6f, -15.6f, -8.3f, -3.0f, 0.1f, 1.2f, 0.9f};   /* dB at C0, C1 ... C8 */
@@ -2214,7 +2262,7 @@ static float ear_w(float note)                  /* the A-curve at a MIDI note, a
 }
 #define EAR_BELLS 0.63f                         /* the bells, D4 to G5 and their partials: 2 dB off */
 #ifdef EN_HOST
-void en_host_pad_company(float line, float most, float call)   /* an A/B; most 0 and call 0: the engine's */
+void en_host_pad_company(float line, float most, float call)   /* an A/B; most 0 and call 0: no rule (the pad of 2026-11-13) */
 {
     pc_line = line;
     pc_most = fm_maxf(most, 0.0f);
@@ -2831,7 +2879,7 @@ static void bells_step(float dt)
     }
     tgt = en_playing && !bells.rest ? bells.lw[0].x + bells.lw[1].x + 6.0f * fm_clampf((cd.pres[L_BELLS].x - 0.6f) * (1.0f / 0.3f), -1.0f, 0.0f)
                                     : -60.0f;
-    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : cd.called > 0.0f ? 1.0f : 0.4f, en_playing ? 0.18f : 6.0f, dt);   /* back quicker than it left (TESTING #15) */
+    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : cd.called > 0.0f ? 0.8f : 0.4f, en_playing ? 0.18f : 6.0f, dt);   /* back quicker than it left (TESTING #15) */
     bells.lin = bells.ldb <= -59.0f ? 0.0f : fm_db2lin(bells.ldb);
 }
 
@@ -3032,6 +3080,16 @@ void en_init(void)
     int i;
     for (i = 0; i <= SN; i++)
         sint[i] = fm_sinf((float)i * (FM_TWO_PI / (float)SN));
+    {   /* the Choir's cycles from their harmonics (SN is CHOIR_LEN: harmonic h at sample i is the sine table at h i) */
+        int k, h;
+        for (k = 0; k < CHOIR_NCYC; k++)
+            for (i = 0; i <= CHOIR_LEN; i++) {
+                float x = 0.0f;
+                for (h = 1; h <= CHOIR_NH; h++)
+                    x += CHOIR_H[k][h - 1] * sint[(h * i) & (SN - 1)];
+                choir_t[k][i] = x;
+            }
+    }
     plate_init();
     for (i = 0; i < TAPE_N; i++)
         tape[i] = 0;
@@ -3357,10 +3415,8 @@ static void render_pad(uint32_t n)
         const int shim = pl_shimmer > 0.0f;     /* the pad's life: the octave partial on its own phase */
         const float ch = 0.6f * pl_chorus, chn = 1.0f / fm_sqrtf(1.0f + ch * ch);   /* and the second oscillator */
         uint32_t j;
-#ifdef EN_HOST
-        int wa = 0;                             /* the wavetable voice (an A/B): the pair of cycles, and the place between */
+        int wa = 0;                             /* the Choir: the pair of cycles, and the place between */
         float wf = 0.0f;
-#endif
         if (amp < 1e-5f && (pad_gain < 1e-4f || v->lin <= 0.0f)) {
             v->amp = 0.0f;
             en_pad_amp[i] = 0.0f;
@@ -3377,6 +3433,12 @@ static void render_pad(uint32_t n)
                 idx = v->idx;                    /* the Rhodes blooms: more overtones as the voice crests (in turns) */
                 h2 = tcur.h2 * v->hk;            /* the cursor's second harmonic and saw (Phase 4); less of it higher up */
                 saw = tcur.saw;
+                if (v->voices == 2) {
+                    const float pos = fm_clampf(0.4f + 0.45f * (0.6f * sine(v->lfo[2]) + 0.4f * sine(v->lfo[3]))
+                                                + 0.15f * v->crest, 0.0f, 0.9999f) * (float)(CHOIR_NCYC - 1);
+                    wa = (int)pos;
+                    wf = pos - (float)wa;
+                }
 #ifdef EN_HOST
                 if (pv_mode == 2 && wt_n > 1) {
                     const float pos = fm_clampf(0.4f + 0.45f * (0.6f * sine(v->lfo[2]) + 0.4f * sine(v->lfo[3]))
@@ -3405,6 +3467,23 @@ static void render_pad(uint32_t n)
                 continue;
             }
 #endif
+            if (v->voices == 2) {               /* the Choir: two cycles, cross-faded */
+                const float fp = p0 * (float)CHOIR_LEN;
+                const int k = (int)fp;
+                const float fr = fp - (float)k;
+                const float xa = choir_t[wa][k] + (choir_t[wa][k + 1] - choir_t[wa][k]) * fr;
+                const float xb = choir_t[wa + 1][k] + (choir_t[wa + 1][k + 1] - choir_t[wa + 1][k]) * fr;
+                x = (xa + (xb - xa) * wf) * 1.2f;
+                p0 += v->inc[0];
+                if (p0 >= 1.0f)
+                    p0 -= 1.0f;
+                amp += (tgt - amp) * 0.01f;
+                x *= amp;
+                padl[j] += x * gl;
+                padr[j] += x * gr;
+                padm[j] += x * g;
+                continue;
+            }
             if (!v->voices) {                   /* FM, the modulator at the anchor's ratio to the carrier (1: a Rhodes) */
                 float m = sine(p1) * idx;
                 x = (sine(p0 + m + 1.0f) + h2 * sine(shim ? p2 : 2.0f * p0)) * 1.2f;   /* one carrier: no beating */

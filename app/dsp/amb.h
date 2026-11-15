@@ -57,7 +57,7 @@ enum {
     P_ECHO, P_ETIME, P_REVERB, P_SIZE,                /* space */
     P_BRIGHT, P_SWELL, P_BTONE, P_MOTION,             /* tone */
     P_TUNE, P_MIDI, P_TEMPO, P_ROOT, P_MODE, P_BOCT,  /* setup, panel encoders, bell octave */
-    P_PADTONE,                                        /* the pad's colour, set by the piece: Rhodes, Voices */
+    P_PADTONE,                                        /* the pad's colour, set by the piece: Rhodes, Voices, Choir */
     P_BASSOCT, P_GLIDE, P_FIFTH,                      /* bass: its octave, its glide, how often it leans on the fifth */
     P_SWING, P_HATS,                                  /* pulse: swing, the hats' colour */
     P_MOOD, P_SPACE,                                  /* TIDE Phase 6, the main page's two new knobs, each an offset around
@@ -189,8 +189,9 @@ void en_host_pad_life(float breath, float shimmer, float wow, float vib, float c
 void en_host_pad_voice(int mode);              /* the pad's voice (an A/B): 0 the engine's, 1 Glass as a Rhodes, 2 a wavetable */
 void en_host_pad_table(int k, const float *t); /* its cycle k of up to 4: 2048 samples, band-limited and levelled by the host */
 void en_host_pad_company(float line, float most, float call);   /* the pad's company (an A/B): the pad is held to `line` dB over
-                                                * the rest as the ear weighs them, by at most `most` dB (0: no hold, the
-                                                * engine's); the bells are called after `call` seconds of a voice left alone (0: never) */
+                                                * the rest as the ear weighs them, by at most `most` dB (0: no hold); the
+                                                * bells are called after `call` seconds of a voice left alone (0: never).
+                                                * The engine's: 3, 14, 20 */
 int en_tap_deg(void);                         /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
 #endif

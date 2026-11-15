@@ -562,6 +562,29 @@ int main(void)
                 }
             }
         }
+        {   /* 2026-11-14: the pad's company calls the bells to a voice left alone, which ends a rest of theirs: they rest
+             * less often (5-9% of the time under -30 dB in two takes; a quarter by the presence walker alone), so two
+             * more hours are given for the first one */
+            int more = 0;
+            for (s = 0; s < 7200 && rests == 0; s++, more++) {
+                float lv;
+                run(1.0f);
+                lv = en_cond[CD_BELLS];
+                if (fabsf(lv - prev) > 1.0f)
+                    rate_bad++;
+                prev = lv;
+                if (lv < -30.0f) {
+                    cur++;
+                    if (cur > longest)
+                        longest = cur;
+                    if (cur == 60)
+                        rests++;
+                } else
+                    cur = 0;
+            }
+            if (more)
+                printf("  the bells: no rest in the two hours; the first after %d s more\n", more);
+        }
         printf("  the bells, 2 h at Drift 50: %d rests of a minute or more (longest %d s), back %d times, level %.1f dB\n",
                rests, longest, back, (double)en_cond[CD_BELLS]);
         printf("  the pad, the same 2 h: the longest stretch with no voice singing %d s\n", pad_longest);
@@ -574,8 +597,8 @@ int main(void)
                                                  * counts only while a voice is up, and the pad rests by itself too) */
         CHECK(dips_back >= dips - 1, "%d recesses, %d back", dips, dips_back);
         CHECK(dip_low >= -15.5f, "a recess went to %.1f dB (15 at the most)", (double)dip_low);
-        CHECK(rests >= 1, "the bells never rested in two hours at Drift 50");
-        CHECK(back >= 1 || rests == 0, "the bells rested and never came back");
+        CHECK(rests >= 1, "the bells never rested in four hours at Drift 50");
+        CHECK(back >= 1 || rests <= 1, "the bells rested and never came back");
         CHECK(rate_bad == 0, "the bells' level moved over 1 dB/s at %d moments", rate_bad);
         CHECK(!bad, "NaN");
     }
@@ -619,6 +642,20 @@ int main(void)
         peak = 0.0f;
         run(600.0f);
         CHECK(!bad && peak > 0.02f && peak < 0.99f, "the Voices landscape: peak %f", (double)peak);
+        /* and the Choir (2026-11-14): it sounds, and its voices sing an octave down (the window C2..F4, the register
+         * walker 6 semitones either way) */
+        en_set(P_PADTONE, 2);
+        peak = 0.0f;
+        run(600.0f);
+        CHECK(!bad && peak > 0.02f && peak < 0.99f, "the Choir: peak %f", (double)peak);
+        {
+            int k, hi = 0;
+            for (k = 0; k < EN_NPAD; k++)
+                if (en_pad_amp[k] > 0.01f && en_pad_note[k] > hi)
+                    hi = en_pad_note[k];
+            printf("  the Choir, 10 min: peak %.3f, the highest voice sounding %d\n", (double)peak, hi);
+            CHECK(hi <= 71, "a Choir voice sings %d (the window ends at 65, the walker adds 6 at the most)", hi);
+        }
         en_set(P_PADTONE, 0);
     }
 

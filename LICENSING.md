@@ -6,8 +6,12 @@ License 2.0**, file by file. The files SAMSARA changed carry its copyright line 
 files it added (`tools/render.c`, `.github/workflows/dev.yml`, the scenarios of its own) are its own, MPL-2.0 too.
 fm1-base and felucca-bsp are in this tree as plain folders (`base/`, `base/bsp/`), unchanged but for what
 `git log -- base` shows; their commits are in `UPSTREAM.md`. The Wheel of Samsara on the screen is drawn in code
-(`app/ui.c`, `draw_wheel`) from the traditional eight-spoked form; no picture was copied. Everything below is
-AMB-1's own text and stands as it is.
+(`app/ui.c`, `draw_wheel`) from the traditional eight-spoked form; no picture was copied. The Choir pad colour
+(`app/dsp/choir.h`, added by SAMSARA, MPL-2.0) holds the first 32 harmonic amplitudes of three single-cycle
+waveforms from **Adventure Kid Waveforms** (AKWF) by Kristoffer Ekstrand, `AKWF_hvoice_0024`, `_0076` and `_0052`,
+which their author dedicated to the public domain (CC0 1.0 Universal:
+<https://github.com/KristofferKarlAxelEkstrand/AKWF-FREE>); no attribution is owed, and this is one given in
+thanks. Everything below is AMB-1's own text and stands as it is.
 
 ---
 

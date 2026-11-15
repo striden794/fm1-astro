@@ -154,7 +154,7 @@ A key, a knob or another button puts the card away, and letting go does nothing 
 
 SAMSARA grows four layers from one scale and one chord.
 
-- The **pad** is up to three voices at a time, a filtered Rhodes or sung voices. Each voice enters
+- The **pad** is up to three voices at a time: a choir, a filtered Rhodes or sung voices. Each voice enters
   slowly, swells and sinks on its own slow walk, stays for a while and dissolves. Sometimes three
   sing, sometimes one, and sometimes the pad rests altogether for minutes.
 - The **bells** are FM bells, softly struck, on four loops of unequal length (13, 17, 23 and 29
@@ -194,10 +194,10 @@ on back to its recipe, hold SAVE for 1.5 s. Tune, MIDI out and Lights are shared
 
 | Piece | What it is |
 |---|---|
-| **Samsara** | D Dorian, 72. All four layers, the Rhodes pad, at half speed. The piece everything else was built around. |
+| **Samsara** | D Dorian, 72. All four layers, the choir pad, at half speed. The piece everything else was built around. |
 | **Maranasati** | Bb Mixolydian, 70. Sung voices and a bass sharing the weight, sparse bells, the slowest weather of the four. |
 | **Anatta** | G Lydian, 84. A brighter Rhodes, busier bells, a light ground. |
-| **Nirvana** | E pentatonic major, 64. Dark round bells in long echoes and the largest room; no ground. |
+| **Nirvana** | E pentatonic major, 64. The choir pad, dark round bells in long echoes and the largest room; no ground. |
 
 Each began from one of AMB-1's recipes: Garden, Tides, Afternoon and Shoreline.
 
@@ -225,12 +225,13 @@ through them in this order.
 
 ### ENV: Pad
 
-![The Pad page: LEVEL 60, SWELL 60, BRIGHT 40, COLOUR Rhodes](img/screen-pad.png "The Pad page")
+![The Pad page: LEVEL 60, SWELL 60, BRIGHT 40, COLOUR Choir](img/screen-pad.png "The Pad page")
 
 - **Level** sets the pad's volume.
 - **Swell** sets how far the voices breathe.
 - **Bright** opens the pad's filter. With Voices, it also moves the vowel.
-- **Colour** picks Rhodes or Voices. Each piece keeps its own.
+- **Colour** picks Rhodes, Voices or Choir. Each piece keeps its own. The Choir sings an octave lower than
+  the other two.
 
 ### ARP: Bells
 
@@ -389,7 +390,7 @@ The defaults are Samsara's; each piece has its own.
 | Pad | Level | 0–100 | 60 |
 | Pad | Swell | 0–100 | 60 |
 | Pad | Bright | 0–100 | 40 |
-| Pad | Colour | Rhodes, Voices | Rhodes |
+| Pad | Colour | Rhodes, Voices, Choir | Choir |
 | Bells | Amount | 0–100 | 65 |
 | Bells | Tone | 0–100 | 50 |
 | Bells | Octave | −2 – +2 | 0 |

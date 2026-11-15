@@ -942,3 +942,18 @@ that gets distracting". Where the numbers of §11 to §15 differ, these win. All
   only to set: `en_host_pad_company(line, most, call)`, the harness command `pad_company 3 14 20`. The engine's
   default output is unchanged (35 minutes byte for byte against take D's base pass). It costs a few operations
   every 46 ms.
+- **The Choir, the engine's (2026-11-14, later)**: Tomorrow's Man, TESTING #56: "I do think you have nailed it"; #57: the choir
+  as the pad in Samsara and Nirvana, the wow's depth not heard, the bells as they are. A third value of `P_PADTONE`
+  (2, "Choir"; Samsara's and Nirvana's recipes carry it, Maranasati stays Voices and Anatta Rhodes). `choir.h` holds
+  3 x 32 harmonic amplitudes (the kit's `tools/choir_harmonics.py`, from AKWF's hvoice 0024, 0076 and 0052, CC0);
+  `en_init` builds three cycles of 1024 samples from them with the sine table (`choir_t`, 12 KB in the pool; read
+  with linear interpolation, 72 dB or more under the cycle). A voice takes the colour as its note starts (`voices` 2)
+  and a change of colour hands the voices over as a change of landscape does. With the Choir: the window is C2..F4
+  (`pad_window`, the voices reseated when it moves), the place between the cycles moves on `lfo[2]` and `lfo[3]`
+  and a little with the crest, and the wow is 1 cent (`CHOIR_WOW` 0.2: at 5 cents a held note walks across the plate's
+  resonances and the pad fails the swell limit under either voice, the kit's `tools/swell_voices.py`). The timbre
+  cursor still walks the Rhodes landscape under a Choir: of its blend only the pad bus's filter is heard, and the
+  anchor names the screen and the reports show say where the cursor is, not what the voices are. The pad's company
+  (`pc_most` 14, `pc_call` 20) is the engine's for every piece; the called bells return at 0.8 dB/s. The host's
+  `pad_voice wt` and `pad_table` stay for A/Bs of other cycles. The engine test: a rest of the bells within four
+  hours (two before: the call ends rests), and the Choir sounds with no voice over B4.

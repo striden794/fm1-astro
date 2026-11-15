@@ -35,12 +35,12 @@ expect par18 64
 expect par3 0
 wait 8000
 shot nirvana.png
-# back to Samsara: as it was left
+# back to Samsara: as it was left (its pad's colour is the Choir, 2, since 2026-11-14)
 turn PRESET -3
-expect par22 0
+expect par22 2
 expect piece 0
 expect par0 50
-spin K4 1
+spin K4 -1
 expect par22 1
 turn PRESET 1
 expect par22 0
@@ -51,7 +51,7 @@ press SAVE
 wait 1700
 release SAVE
 expect par0 60
-expect par22 0
+expect par22 2
 expect store_writes 0
 # a tweak, saved, survives a reboot, on the piece it was made on (the Bells page: ARP)
 tap ARP

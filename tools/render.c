@@ -36,6 +36,7 @@
  *   pad_voice wt                  host only: every pad voice plays the wavetable (two or more cycles loaded)
  *   pad_company 3 14 20           host only: the pad's company (an A/B): the pad held to 3 dB over the rest as the ear
  *                                 weighs them, by at most 14 dB; the bells called after 20 s of a voice left alone
+ *                                 (the engine's own since 2026-11-14; "pad_company 3 0 0": no rule)
  * --dry-out FILE / --dry-in FILE: each layer's own meter energy, recorded or replayed (with --meter-out / --meter-in:
  * the whole of what the governor hears). A pass given both files of another plays that pass's performance note for
  * note whatever its pad voice sounds like: one moment under several voices (the same --csv and --env, which cut the
