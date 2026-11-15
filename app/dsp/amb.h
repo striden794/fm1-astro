@@ -129,9 +129,11 @@ enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_P
        CD_SHARE_PAD, CD_SHARE_BELLS, CD_SHARE_BASS, CD_SHARE_GROUND, CD_GAIN_PAD, CD_GAIN_BELLS, CD_GAIN_BASS,
        CD_GAIN_GROUND, CD_PAD_TARGET, CD_PAD_VOICES, CD_GROUND, CD_OPENING, CD_BELLS, CD_BASS, CD_FF,
        CD_CURSOR_X, CD_CURSOR_Y, CD_ANCHOR, CD_S_MODE, CD_S_ROOT, CD_FIELD_SHIFT, CD_FIELD_MOVE,
-       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, CD_EBB, CD_PAD_DIP, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
+       CD_BELL_ACT, CD_ALONE, CD_FIELD_PCS, CD_EBB, CD_PAD_DIP, CD_PAD_EXPO, CD_PAD_HOLD, EN_NCOND };   /* Phase 5b: the bells' activity (log2), how thin the garden
                                                            * under them is (0..1), the field's pitch classes (a 12-bit set, C = bit 0);
-                                                           * Phase 5c: the ebb, dB (0: the tide is in) */
+                                                           * Phase 5c: the ebb, dB (0: the tide is in);
+                                                           * 2026-11-14: the pad over its company as the ear weighs them, dB, and
+                                                           * the hold on the pad's gain that answers it, dB (0: none) */
 extern const char *const EN_COND_NAME[EN_NCOND];
 extern volatile float en_cond[EN_NCOND];
 const char *en_anchor_name(void);              /* TIDE: the timbre cursor's nearest anchor (Phase 4) */
@@ -186,6 +188,9 @@ extern void (*en_host_meter_dry)(float *dry, int n);
 void en_host_pad_life(float breath, float shimmer, float wow, float vib, float chorus);   /* the pad's life, each 0 (the engine's) to 1 */
 void en_host_pad_voice(int mode);              /* the pad's voice (an A/B): 0 the engine's, 1 Glass as a Rhodes, 2 a wavetable */
 void en_host_pad_table(int k, const float *t); /* its cycle k of up to 4: 2048 samples, band-limited and levelled by the host */
+void en_host_pad_company(float line, float most, float call);   /* the pad's company (an A/B): the pad is held to `line` dB over
+                                                * the rest as the ear weighs them, by at most `most` dB (0: no hold, the
+                                                * engine's); the bells are called after `call` seconds of a voice left alone (0: never) */
 int en_tap_deg(void);                         /* the chord's scale degree */
 int en_tap_loop_notes(void);                   /* notes held by the four loops together */
 #endif

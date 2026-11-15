@@ -926,3 +926,19 @@ that gets distracting". Where the numbers of §11 to §15 differ, these win. All
   `tools/pad_tables.py`; the command line holds 96 characters, so a short relative path). The engine's default
   output is unchanged (35 minutes byte for byte). A device build of the wavetable would want shorter cycles in
   flash; by count it reads two tables a sample where the FM voice reads three.
+- **The pad's company, for an A/B (2026-11-14)**: Tomorrow's Man, TESTING #55: with only the pad's level moved, the pad level
+  with the rest to the ear is "the best balance", and held down with nothing else there the moment is "a static
+  fade out"; a voice he liked turned into a drone when it was left as alone. At his moment (0:28 of take D) the
+  bells were in a rest of their own and the governor's meter (K-weighted) gave the bass 30-45% of the energy, where
+  the ear (A-weighted) hears a voice 16.5 dB over everything. So the governor also weighs the pad against its
+  company as the ear does (`ear_w`: the A-curve at the loudest voice's note, the bass's and Ground's; the bells 2 dB
+  off; +4 dB, set against the solo pass at two moments), on a 5 s meter for the pad and the 20 s one for the rest:
+  `cd.expo`, the conductor's column `pad_expo`, always computed. Two rules, both off by default (`pc_most`,
+  `pc_call` 0): the pad's gain is held (`cd.hold`, column `pad_hold`, 0.25 dB/s on and 0.1 dB/s back, a voice's own
+  rise less by that while it is given back, as for the recess) so the pad stands at most `pc_line` dB over its
+  company, by at most `pc_most` dB, the hold following the level the pad would have without it; and a voice that
+  is up and would stand 3 dB over the line for `pc_call` seconds calls the bells (a rest of theirs ends, their
+  activity is lifted to a passage, they return at 1 dB/s for 90 s), then four minutes before the next call. Host
+  only to set: `en_host_pad_company(line, most, call)`, the harness command `pad_company 3 14 20`. The engine's
+  default output is unchanged (35 minutes byte for byte against take D's base pass). It costs a few operations
+  every 46 ms.

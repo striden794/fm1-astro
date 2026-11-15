@@ -340,7 +340,8 @@ const char *const EN_COND_NAME[EN_NCOND] = {
     "s_speed", "s_density", "s_bright", "speed", "level20", "level60", "target", "trim",
     "share_pad", "share_bells", "share_bass", "share_ground", "gain_pad", "gain_bells", "gain_bass", "gain_ground",
     "pad_target", "pad_voices", "ground", "opening", "bells", "bass", "ff", "cursor_x", "cursor_y", "anchor",
-    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs", "ebb", "pad_dip"};
+    "s_mode", "s_root", "field_shift", "field_move", "bell_act", "alone", "field_pcs", "ebb", "pad_dip",
+    "pad_expo", "pad_hold"};
 
 static int16_t par[P_NPARAMS];
 static uint32_t pool = 0xAADu;                  /* Ionian until told. TIDE Phase 5: the field's scale, relative to the field's root */
@@ -716,7 +717,13 @@ static struct {
     float recess, away;                         /* real seconds of the recess left at its bottom; seconds with no voice heard */
     float dip, dip_depth;                       /* the recess: dB on the pad's gain (0: none); this one's bottom */
     uint8_t recessing;                          /* 0 a turn, 1 going down or at the bottom, 2 coming back */
-    uint32_t acc;                              /* samples toward the next step */
+    /* the pad's company (2026-11-14; the note above ear_w) */
+    float e5;                                   /* the pad's energy on a 5 s meter (a voice rises 7 dB in the 20 s one's lag) */
+    float expo;                                 /* the pad over its company as the ear weighs them, dB, as it sounds */
+    float hold, hold5;                          /* dB on the pad's gain (0: none); the same as the 5 s meter hears it */
+    float exposed, called;                      /* real seconds a voice has stood alone; seconds of the bells' quick return left */
+    uint8_t hold_up;                            /* the hold is being given back this step */
+    uint32_t acc;                             /* samples toward the next step */
 } cd;
 /* the pad's turn and recess (the note above pad_count) */
 static float pad_turn_lo = 75.0f, pad_turn_span = 135.0f;      /* a turn: 75-210 s with a voice up */
@@ -727,6 +734,11 @@ static float pad_recess_lo = 20.0f, pad_recess_span = 50.0f;   /* a recess: 20-7
 #define PAD_CARRY (150.0f + 150.0f * frand())   /* the pad alone while the bass rests: 2.5-5 minutes, then the bass returns */
 #define PAD_TURN (pad_turn_lo + pad_turn_span * frand())
 #define PAD_RECESS (pad_recess_lo + pad_recess_span * frand())
+/* the pad's company (the note above ear_w): off unless the harness sets it */
+static float pc_line = 3.0f, pc_most, pc_call;  /* dB over its company a pad may stand; the most the hold takes (0: no hold);
+                                                 * real seconds alone before the bells are called (0: never) */
+#define PC_FALL 0.25f                           /* dB/s: the hold comes on a little slower than a voice rises (0.36) */
+#define PC_RISE 0.1f                            /* and is given back at the recess's pace */
 static float ground_db = -60.0f, ground_lin;   /* the Ground layer's level */
 static uint8_t ground_on;
 static float ground_gap;                        /* seconds before Ground may enter again; its stay */
@@ -2091,6 +2103,8 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     cd.turn = cd.away = cd.recess = cd.dip = cd.dip_depth = 0.0f;
     cd.turn_max = PAD_TURN;
     cd.recessing = 0;
+    cd.e5 = cd.expo = cd.hold = cd.hold5 = cd.exposed = cd.called = 0.0f;
+    cd.hold_up = 0;
     for (i = 0; i < EN_NPAD; i++) {
         pad_t *v = &pad[i];
         /* deeper swings at the same speed (Tomorrow's Man, TESTING #11): sd x1.25, tau x1.56 keeps dB/s where it was */
@@ -2172,6 +2186,39 @@ void en_host_pad_turn(float lo, float hi, float rlo, float rhi)   /* an A/B; lo 
     pad_recess_lo = rlo;
     pad_recess_span = fm_maxf(rhi - rlo, 0.0f);
     cd.turn_max = PAD_TURN;
+}
+#endif
+
+/* The pad's company (2026-11-14, after v1; Tomorrow's Man, TESTING #52 to #55: a pad tone that lingers "alarms", under twelve
+ * voices and an octave apart; with only the pad's level moved (#55) "the best balance" was the pad 14 dB down, level
+ * with the rest to the ear, and the same voice left as alone at another moment alarmed too). Measured at his moment
+ * (0:28 of take D): one voice 16.5 dB over everything else, A-weighted, the bells in a rest of their own for seven
+ * minutes; the governor saw nothing wrong, since by its meter (K-weighted) the bass held 30-45% of the energy. To the
+ * ear a bass at 55-110 Hz is 18-28 dB less than its meter reading and a pad voice at 175-260 Hz 8-12 dB less: the
+ * bass is hardly company. So the pad's level is weighed against its company as the ear weighs them (ear_w: the
+ * A-curve at each layer's note), and
+ *  - the pad's gain is held (cd.hold, its own slews, as the recess's cd.dip) so the pad stands at most pc_line dB over
+ *    its company, by at most pc_most dB;
+ *  - a voice that is up and would stand 3 dB or more over the line for pc_call seconds calls the bells: a rest of
+ *    theirs ends, a lull becomes a passage, and they come back at 1 dB/s (struck notes: no swell). His word for the
+ *    pad held down with nothing else there: "a static fade out". Then four minutes before the next call.
+ * The hold follows the level the pad would have without it (the meter less the hold as that meter hears it), so it
+ * does not chase itself. Real seconds. At Hold nothing of it moves. Off by default (pc_most, pc_call 0). */
+static float ear_w(float note)                  /* the A-curve at a MIDI note, as a weight on energy */
+{
+    static const float A[9] = {-55.8f, -38.7f, -25.6f, -15.6f, -8.3f, -3.0f, 0.1f, 1.2f, 0.9f};   /* dB at C0, C1 ... C8 */
+    const float x = fm_clampf((note - 12.0f) * (1.0f / 12.0f), 0.0f, 7.999f);
+    const int i = (int)x;
+    const float g = fm_db2lin(A[i] + (A[i + 1] - A[i]) * (x - (float)i));
+    return g * g;
+}
+#define EAR_BELLS 0.63f                         /* the bells, D4 to G5 and their partials: 2 dB off */
+#ifdef EN_HOST
+void en_host_pad_company(float line, float most, float call)   /* an A/B; most 0 and call 0: the engine's */
+{
+    pc_line = line;
+    pc_most = fm_maxf(most, 0.0f);
+    pc_call = fm_maxf(call, 0.0f);
 }
 #endif
 
@@ -2356,6 +2403,50 @@ static void governor_step(float dt)
         cd.alone += (company * (-1.0f / 9.0f) - cd.alone) * fm_minf(dt * (1.0f / 20.0f), 1.0f);
         company *= 4.0f / 9.0f;
     }
+    /* the pad's company (the note above ear_w) */
+    {
+        float wp = 0.0f, top = -99.0f, rest, un;
+        int i;
+        for (i = 0; i < EN_NPAD; i++)
+            if (pad[i].st != PV_OFF && pad[i].ldb > top) {
+                top = pad[i].ldb;
+                wp = ear_w(pad[i].note);        /* the loudest voice's note stands for the pad */
+            }
+        cd.e5 += (e[L_PAD] - cd.e5) * fm_minf(dt * (1.0f / 5.0f), 1.0f);
+        cd.hold5 += (cd.hold - cd.hold5) * fm_minf(dt * (1.0f / 5.0f), 1.0f);
+        rest = EAR_BELLS * cd.e20[L_BELLS] + ear_w((float)bass.midi_note) * cd.e20[L_BASS] + ear_w(ground_target) * cd.e20[L_GROUND];
+        /* (+4 dB: against the pad's solo pass and the mix less it, A-weighted, the notes' weights alone read 3.5 dB low
+         * at 0:28 of take D (13.0 for 16.5) and 4.8 low at 0:14 (2.1 for 6.9): the pad's overtones are heard better than
+         * its note, and the bass's sub-octave not at all) */
+        cd.expo = fm_clampf(4.0f + 3.0103f * (fm_log2f(fm_maxf(wp * cd.e5, 1e-12f)) - fm_log2f(fm_maxf(rest, 1e-12f))), -40.0f, 40.0f);
+        cd.hold_up = 0;
+        if (pc_most > 0.0f || pc_call > 0.0f) {
+            const float was = cd.hold;
+            un = cd.expo - cd.hold5;            /* where the pad would stand without the hold */
+            cd.hold = slew(cd.hold, -fm_clampf(un - pc_line, 0.0f, pc_most), PC_RISE, PC_FALL, dt);
+            cd.hold_up = cd.hold > was;
+            if (cd.called > 0.0f)
+                cd.called -= dt;
+            if (cd.exposed < 0.0f)              /* the grace after a call */
+                cd.exposed = fm_minf(cd.exposed + dt, 0.0f);
+            else if (un > pc_line + 3.0f && top > -15.0f && cd.opening <= 0.0f)
+                cd.exposed += dt;
+            else
+                cd.exposed = fm_maxf(cd.exposed - dt, 0.0f);
+            if (pc_call > 0.0f && cd.exposed > pc_call && bell_vol > 0.0f) {
+                if (bells.rest) {
+                    bells.rest = 0;
+                    bells.stay_t = 0.0f;
+                    bells.min_stay = 240.0f + 360.0f * frand();
+                }
+                cd.pres[L_BELLS].x = fm_maxf(cd.pres[L_BELLS].x, 0.5f);
+                cd.bact.x = fm_maxf(cd.bact.x, 0.2f + 0.4f * frand());   /* a passage; its own timer lets it up (bells_step) */
+                bells.busy = 0.0f;
+                cd.called = 90.0f;
+                cd.exposed = -240.0f;
+            }
+        }
+    }
     for (k = 0; k < NLAYERS; k++) {
         float want;
         cd.share[k] = tot > 0.0f ? cd.e20[k] / tot : 0.0f;
@@ -2369,7 +2460,7 @@ static void governor_step(float dt)
                          0.16f, 0.16f, dt);    /* the bells are struck notes: the governor never lifts them (Phase 4: at most
                                                 * 3 dB, and it sat there; before that +9 to +15 in a thin garden, Tomorrow's Man's loud
                                                 * lone bells), it turns them down with the mix, and by their company */
-        cd.g[k] = fm_db2lin(cd.gdb[k] + cd.ebb + (k == L_PAD ? cd.dip : 0.0f));   /* Phase 5c: and the ebb, on its own slews;
+        cd.g[k] = fm_db2lin(cd.gdb[k] + cd.ebb + (k == L_PAD ? cd.dip + cd.hold : 0.0f));   /* Phase 5c: and the ebb, on its own slews;
                                                  * 2026-11-13: and the pad's recess */
     }
     if (cd.share[L_PAD] > cap + 0.05f && cd.lead[L_PAD] > 120.0f)
@@ -2565,7 +2656,8 @@ static void pad_step(float dt)
         /* (2026-11-13: while the pad's recess is coming back the voice's own rise is less by the recess's, so the two
          * together are the 0.4 dB/s the rate budget was written for; summed, a take read 1.58 dB in 2 s against 1.5) */
         v->ldb = slew(v->ldb, tgt, cd.opening > 0.0f || (v->st == PV_ON && v->ldb < top - 20.0f) ? 2.0f
-                                   : cd.recessing == 2 ? v->rise - PAD_DIP_RISE : v->rise,
+                                   : cd.recessing == 2 ? v->rise - PAD_DIP_RISE
+                                   : cd.hold_up ? v->rise - PC_RISE : v->rise,   /* (2026-11-14: the hold given back, the same) */
                       v->st == PV_ON ? fm_maxf(v->rise * 0.75f, v->fall) : fm_maxf(v->fall, SHED_FALL[shed]), dt);
         v->crest = fm_clampf((v->ldb - v->tilt - v->base_db + 4.0f) * (1.0f / 8.0f), 0.0f, 1.0f);
         if (v->st == PV_OUT && v->ldb <= -50.0f) {
@@ -2739,7 +2831,7 @@ static void bells_step(float dt)
     }
     tgt = en_playing && !bells.rest ? bells.lw[0].x + bells.lw[1].x + 6.0f * fm_clampf((cd.pres[L_BELLS].x - 0.6f) * (1.0f / 0.3f), -1.0f, 0.0f)
                                     : -60.0f;
-    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : 0.4f, en_playing ? 0.18f : 6.0f, dt);   /* back quicker than it left (TESTING #15) */
+    bells.ldb = slew(bells.ldb, tgt, cd.opening > 0.0f ? 2.0f : cd.called > 0.0f ? 1.0f : 0.4f, en_playing ? 0.18f : 6.0f, dt);   /* back quicker than it left (TESTING #15) */
     bells.lin = bells.ldb <= -59.0f ? 0.0f : fm_db2lin(bells.ldb);
 }
 
@@ -2875,6 +2967,8 @@ static void conductor_step(void)                /* every CTRL_N samples */
     en_cond[CD_FIELD_PCS] = (float)rot12(pool, froot);
     en_cond[CD_EBB] = cd.ebb;
     en_cond[CD_PAD_DIP] = cd.dip;       /* 2026-11-13: the pad's recess, dB */
+    en_cond[CD_PAD_EXPO] = cd.expo;     /* 2026-11-14: the pad over its company to the ear, dB; the hold, dB */
+    en_cond[CD_PAD_HOLD] = cd.hold;
 }
 
 static void regrow(void)                        /* a new piece: fresh loops, home chord, the weather afresh */

@@ -34,6 +34,8 @@
  *   pad_table 0 FILE              host only: cycle 0 (of up to 4) of the wavetable pad voice: 2048 raw floats, made by
  *                                 tools/pad_tables.py of the kit; a short path with no spaces
  *   pad_voice wt                  host only: every pad voice plays the wavetable (two or more cycles loaded)
+ *   pad_company 3 14 20           host only: the pad's company (an A/B): the pad held to 3 dB over the rest as the ear
+ *                                 weighs them, by at most 14 dB; the bells called after 20 s of a voice left alone
  * --dry-out FILE / --dry-in FILE: each layer's own meter energy, recorded or replayed (with --meter-out / --meter-in:
  * the whole of what the governor hears). A pass given both files of another plays that pass's performance note for
  * note whatever its pad voice sounds like: one moment under several voices (the same --csv and --env, which cut the
@@ -385,6 +387,11 @@ static int run_cmd(const char *text, double t)
         float v[4] = {75.0f, 210.0f, 20.0f, 70.0f};
         sscanf(text, "%*s %f %f %f %f", &v[0], &v[1], &v[2], &v[3]);
         en_host_pad_turn(v[0], v[1], v[2], v[3]);
+    } else if (!strcmp(c, "pad_company")) {     /* host only: the pad held to LINE dB over its company by at most MOST dB;
+                                                 * the bells called after CALL seconds of a voice alone. "pad_company 0 0 0": off */
+        float v[3] = {3.0f, 0.0f, 0.0f};
+        sscanf(text, "%*s %f %f %f", &v[0], &v[1], &v[2]);
+        en_host_pad_company(v[0], v[1], v[2]);
     } else if (!strcmp(c, "pad_range")) {       /* host only: the pad's window, MIDI notes (the engine's: 48 77) */
         if (n >= 3)
             en_host_pad_range(atoi(a), atoi(b));
