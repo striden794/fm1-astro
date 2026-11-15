@@ -394,7 +394,7 @@ static float sint[SN + 1];
 #include "choir.h"
 #define CHOIR_LEN 1024
 #define CHOIR_WOW 0.2f
-static float choir_t[CHOIR_NCYC][CHOIR_LEN + 1] EN_POOL;
+static float choir_t[CHOIR_NCYC][CHOIR_LEN + 1];  /* in .bss, not the pool: the pool was 444 bytes short on the device */
 static uint8_t choir_on;                        /* the pad's colour is the Choir (P_PADTONE 2) */
 static inline float sine(float ph)              /* ph in turns, any value >= 0 */
 {

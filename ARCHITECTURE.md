@@ -946,7 +946,7 @@ that gets distracting". Where the numbers of §11 to §15 differ, these win. All
   as the pad in Samsara and Nirvana, the wow's depth not heard, the bells as they are. A third value of `P_PADTONE`
   (2, "Choir"; Samsara's and Nirvana's recipes carry it, Maranasati stays Voices and Anatta Rhodes). `choir.h` holds
   3 x 32 harmonic amplitudes (the kit's `tools/choir_harmonics.py`, from AKWF's hvoice 0024, 0076 and 0052, CC0);
-  `en_init` builds three cycles of 1024 samples from them with the sine table (`choir_t`, 12 KB in the pool; read
+  `en_init` builds three cycles of 1024 samples from them with the sine table (`choir_t`, 12 KB in the RAM beside the pool, which was 444 bytes short for it; read
   with linear interpolation, 72 dB or more under the cycle). A voice takes the colour as its note starts (`voices` 2)
   and a change of colour hands the voices over as a change of landscape does. With the Choir: the window is C2..F4
   (`pad_window`, the voices reseated when it moves), the place between the cycles moves on `lfo[2]` and `lfo[3]`
