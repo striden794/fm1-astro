@@ -9,6 +9,9 @@
 #include "amb.h"
 
 #define APP_NAME "SAMSARA"
+#define APP_TAGLINE "FOR BRETT"          /* the dedication, under the name on the start-up screen (Tomorrow's Man, TESTING #60,
+                                          * 2026-11-16: "the words 'for Brett' on the screen"); capitals: the small
+                                          * face has no lower case in this build */
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
 #ifdef APP_VERSION                       /* a release build passes its own (tools/build.py --release) */
 #define EN_VERSION APP_VERSION

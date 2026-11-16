@@ -1,5 +1,7 @@
 # SAMSARA for the M-VAVE FM-1
 
+*For Brett.*
+
 SAMSARA turns the M-VAVE FM-1 into a slow ambient piece that plays itself and changes over hours, in the spirit of
 Brian Eno's *Reflection*: a breathing pad, soft bells, a gliding bass and a rare low ground that come and go like
 weather, through a tape echo and a wandering plate. Tone, harmony and density drift; every so often the whole piece
