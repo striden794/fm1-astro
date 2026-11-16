@@ -14,8 +14,10 @@ What differs:
   `gh run download --name packages`. It signs nothing and publishes nothing, so it also works in a private
   repository. A release is still AMB-1's way (below, "Publishing a release"): a tag, the shared builder, signed
   provenance; that needs a public repository.
-- **The site.** `tools/make_pages.py`, `tools/publish_pages.sh` and `web/app/` are AMB-1's and still make AMB-1's
-  site and web app; SAMSARA has no site of its own yet.
+- **The site.** `tools/make_pages.py OUT_DIR` makes SAMSARA's own (the landing page, the emulator as the web
+  player, the manual), and with a release package and its version after `OUT_DIR` the installer and the download
+  too; `tools/publish_pages.sh [VERSION]` builds it and pushes it to the `gh-pages` branch. `web/app/` is AMB-1's
+  web app, unchanged and unused.
 - **The manual's pictures:** `app/build/host/samsara_host docs/img/shots.amb app/build/shots`, copy the PNGs to
   `docs/img/`, then `python tools/gen_manual_figures.py` for the panel drawing.
 - **The guard.** The Setup page shows the audio load and its peak since switching on; over 62 % the engine sheds
