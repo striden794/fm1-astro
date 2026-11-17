@@ -1,0 +1,9 @@
+{
+  "what": "A slow generative ambient piece that plays itself for hours and never repeats: a choir pad, soft bells, a gliding bass and a rare low ground drift through harmonies and colours like weather. Four pieces, four knobs to tend it (Mood, Density, Drift, Space). A fork of AMB-1.",
+  "author": "Tomorrow's Man",
+  "kinds": ["synth"],
+  "play": "https://tomorrowsman.github.io/fm1-samsara/emu/",
+  "image": "docs/card.png",
+  "color": "#F4DA92",
+  "sounds": "CC0: the choir pad's harmonics, from three single cycles of Adventure Kid Waveforms (AKWF-FREE, Kristoffer Ekstrand); everything else synthesised"
+}

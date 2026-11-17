@@ -137,6 +137,7 @@ enum { CD_BRIGHT, CD_DENSITY, CD_REGISTER, CD_SPACE, CD_CHORD, CD_PRES_PAD, CD_P
 extern const char *const EN_COND_NAME[EN_NCOND];
 extern volatile float en_cond[EN_NCOND];
 const char *en_anchor_name(void);              /* TIDE: the timbre cursor's nearest anchor (Phase 4) */
+const char *en_tone_word(void);                /* SAMSARA: the screen's word for it ("Choir" when the pad is the Choir) */
 /* TIDE Phase 5: the harmonic field as it is now (the player's Root and scale are home; the field moves from there
  * over hours, a pitch class at a time): its root (a pitch class), its scale relative to that root, its name */
 extern volatile uint8_t en_field_root;

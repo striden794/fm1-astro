@@ -1012,6 +1012,7 @@ static void draw_main(void)
     }
     h = hash(h, (uint32_t)tide_px() | (uint32_t)bright_px() << 8 | (uint32_t)dens_px() << 16 | (uint32_t)en_cond[CD_ANCHOR] << 24 |
                     (uint32_t)(proj.par[P_DRIFT] <= 0) << 31);
+    h = hash(h, (uint32_t)(unsigned char)en_tone_word()[0]);
     h = hash(h, (uint32_t)(en_drift * 40.0f) | (uint32_t)q16(en_pad_level) << 8 | (uint32_t)q16(en_bass_level) << 13 |
                     (uint32_t)q16(en_ground_level) << 18);
     for (i = 0; i < 4; i++)
@@ -1020,7 +1021,7 @@ static void draw_main(void)
         return;
     ui.sig[1] = h;
     cv_begin(240, MAIN_H, K_BG);
-    cv_text(10, 4, &FONT_XS, en_anchor_name(), K_DIM);   /* top left: the timbre nearest to where the tone is now */
+    cv_text(10, 4, &FONT_XS, en_tone_word(), K_DIM);     /* top left: the timbre nearest to where the tone is now (the Choir: its name) */
     if (en_frozen) {                             /* the way to the next chord, top right (held: frozen) */
         cv_text(232 - text_w(&FONT_XS, "held"), 4, &FONT_XS, "held", K_FROST);
     } else if (proj.par[P_DRIFT] <= 0) {         /* Drift fully down: everything holds where it is */

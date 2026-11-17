@@ -692,6 +692,9 @@ static void cursor_blend(int init, float dt)
 }
 
 const char *en_anchor_name(void) { return LAND[land_now][tcur.near].name; }
+/* the screen's word: the Choir plays none of the Rhodes map's colours (only its brightness follows the map), so it is
+ * named itself (Tomorrow's Man, TESTING #64 d, 2026-11-17: "let's make it accurate") */
+const char *en_tone_word(void) { return choir_on ? "Choir" : en_anchor_name(); }
 
 /* ------------------------------------------------------ TIDE: the conductor's state --- */
 enum { L_PAD, L_BELLS, L_BASS, L_GROUND, NLAYERS };
