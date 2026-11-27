@@ -5,8 +5,8 @@ wait 500
 expect view 0
 expect par28 0
 expect par29 0
-expect par4 40
-expect par6 25
+expect par4 20
+expect par6 15
 shot tide.png
 # KNOB 1: Mood, dark .. bright, -50 .. +50 around the piece's own
 spin K1 20
@@ -22,18 +22,18 @@ shot mood_dark.png
 spin K1 50
 expect par28 0
 # Mood moves nothing on the Pad page: Bright there is still the piece's (par12)
-expect par12 40
+expect par12 30
 # KNOB 2: Density
 spin K2 15
-expect par4 55
+expect par4 35
 spin K2 -15
-expect par4 40
+expect par4 20
 # KNOB 4: Space, near .. far; the Space page's own knobs stay where they are (par8 Echo, par10 Reverb, par11 Size)
 spin K4 30
 expect par29 30
-expect par8 45
-expect par10 65
-expect par11 80
+expect par8 55
+expect par10 85
+expect par11 95
 spin K4 -80
 expect par29 -50
 spin K4 50
@@ -55,16 +55,16 @@ expect par6 25
 tap ARP
 expect view 2
 spin K1 10
-expect par1 75
+expect par1 55
 spin K1 -10
 spin K2 -20
-expect par14 30
+expect par14 50
 spin K2 20
 spin K3 1
-expect par21 1
+expect par21 2
 spin K3 -1
 spin K4 5
-expect par5 40
+expect par5 25
 spin K4 -5
 wait 200
 shot bells.png
@@ -72,13 +72,13 @@ shot bells.png
 tap SEQ
 expect view 4
 spin K1 10
-expect par3 50
+expect par3 10
 spin K1 -10
 spin K2 5
-expect par15 55
+expect par15 35
 spin K2 -5
 spin K3 3
-expect par18 75
+expect par18 47
 spin K3 -3
 spin K4 9
 wait 200
@@ -100,7 +100,7 @@ wait 1000
 shot help_home.png
 release HOME
 wait 200
-# save and restore: Mood and Space on Samsara, a different Mood on Anatta, each kept with its piece
+# save and restore: Mood and Space on Cryosleep, a different Mood on Hyperlane, each kept with its piece
 spin K1 -15
 spin K4 12
 expect par28 -15

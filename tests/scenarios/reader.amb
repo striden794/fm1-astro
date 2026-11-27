@@ -3,18 +3,18 @@
 wait 200
 listen
 wait 100
-said Tide page: Mood 0, Density 40, Drift 0.50 times, Space 0. Piece Samsara, D Dorian, tempo 72, growing
+said Tide page: Mood 0, Density 20, Drift 0.38 times, Space 0. Piece Cryosleep, A Aeolian, tempo 44, growing
 # (the garden follows, queued: the chord, how far to the next, the scale from the root up)
 listen
 where
-said Scale D, E, F, G, A, B, C
+said Scale A, B, C, D, E, F, G
 # a page settles before it is said
 tap ENV
 wait 300
-said Pad page: Level 60, Swell 60, Bright 40, Colour Choir
+said Pad page: Level 65, Swell 90, Bright 30, Colour Glass
 tap GLO
 wait 300
-said Setup page: Root D, Tune 0, MIDI out On, Lights On
+said Setup page: Root A, Tune 0, MIDI out On, Lights On
 # a knob: its name and value, once it settles
 spin K2 3
 wait 300
@@ -27,22 +27,22 @@ wait 300
 # SELECT turns the pages
 turn SELECT -1
 wait 300
-said Space page: Echo 45, Echo time 1 bar, Reverb 65, Size 80
+said Space page: Echo 55, Echo time 2 bars, Reverb 85, Size 95
 spin K2 -1
 wait 300
-said Echo time 1/2.
+said Echo time 1 bar
 tap HOME
 wait 300
 said Tide page
 spin K3 20
 wait 300
-said Drift 0.87 times
+said Drift 0.66 times
 # HOME + SELECT: the tempo
 press HOME
 turn SELECT 2 200
 release HOME
 wait 300
-said TEMPO 74
+said TEMPO 46
 # the keys: a note out of the scale and back in; the root stays
 tapkey w1
 said REMOVED G
@@ -52,19 +52,19 @@ tapkey b3
 said ADDED C#
 tapkey b3
 said REMOVED C#
-tapkey w5
+tapkey w2
 said THE ROOT STAYS (SETUP)
 # the encoders: the mode, the piece (with its key and tempo)
 turn ALGO 1
-said MODE Phrygian
+said MODE Pent maj
 turn ALGO -1
-said MODE Dorian
+said MODE Aeolian
 turn PRESET 1
-said PIECE Maranasati, Bb Mixolyd., tempo 70
+said PIECE Derelict, Eb Phrygian, tempo 52
 wait 300
 unsaid Level
 turn PRESET -1
-said PIECE Samsara, D Dorian, tempo 74
+said PIECE Cryosleep, A Aeolian, tempo 46
 wait 300
 # the buttons' messages, said once
 tap REC
@@ -80,9 +80,9 @@ said GROWING
 wait 300
 unsaid RESTING
 tap OCT+
-said BELL OCTAVE +1
+said BELL OCTAVE +2
 tap OCT-
-said BELL OCTAVE 0
+said BELL OCTAVE +1
 tap EDIT
 said NEXT CHORD ON THE BAR
 # a help card: its button, then its lines
@@ -109,7 +109,7 @@ midi FC 00 00
 wait 300
 said RESTING
 wait 1000
-said Tempo 74
+said Tempo 46
 # WHERE: everything again
 where
-said Tide page: Mood 0, Density 40, Drift 0.87 times, Space 0. Piece Samsara, D Dorian, tempo 74, resting
+said Tide page: Mood 0, Density 20, Drift 0.66 times, Space 0. Piece Cryosleep, A Aeolian, tempo 46, resting

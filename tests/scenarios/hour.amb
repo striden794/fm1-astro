@@ -3,7 +3,7 @@
 # output bounded, the garden still growing at the end, and nothing saved by itself while it plays
 wait 500
 spin K3 75
-expect par6 100
+expect par6 90
 peakreset
 wait 600000
 shot h10.png

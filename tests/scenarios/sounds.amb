@@ -1,0 +1,123 @@
+# the Sounds page: a layer's page button pressed again opens it (the pad's colour, the bells' and the bass' sound)
+wait 500
+expect piece 0
+# Cryosleep: the Glass pad (4), Crystal bells (5), the Void bass (4)
+expect par22 4
+expect par30 5
+expect par31 4
+# the Pad page, then its button again: Sounds
+tap ENV
+tap ENV
+spin K1 1
+expect par22 5
+spin K2 -1
+expect par30 4
+spin K3 -1
+expect par31 3
+# the ranges: the pad's six colours, six bell sounds and six bass sounds, no more, no fewer (the originals, Chime and Sub, are 0)
+spin K1 9
+expect par22 5
+spin K2 9
+expect par30 5
+spin K3 9
+expect par31 5
+spin K2 -9
+expect par30 0
+spin K3 -9
+expect par31 0
+# the bells' button from Sounds is the Bells page again, and its button once more is Sounds
+tap ARP
+tap ARP
+spin K2 2
+expect par30 2
+# the bass' button twice: Sounds again
+tap LFO
+tap LFO
+spin K3 3
+expect par31 3
+# a layer's page button held (not tapped): the next of its complete sounds, its card up, no page change
+# pad sounds 1..4: Aurora Wash (colour 3), Glass Hall (4), Distant Organ (5), Deep Choir (2), then round to 1
+press ENV
+wait 1000
+release ENV
+expect par22 3
+press ENV
+wait 1000
+release ENV
+expect par22 4
+press ENV
+wait 1000
+release ENV
+expect par22 5
+press ENV
+wait 1000
+release ENV
+expect par22 2
+press ENV
+wait 1000
+release ENV
+expect par22 3
+expect par12 60
+expect par13 70
+# bell sounds 1..6: Glass, Chime, Plink, Wood, Gong, Crystal (the types 1 0 2 3 4 5), then round to 1
+press ARP
+wait 1000
+release ARP
+expect par30 1
+press ARP
+wait 1000
+release ARP
+expect par30 0
+press ARP
+wait 1000
+release ARP
+expect par30 2
+press ARP
+wait 1000
+release ARP
+expect par30 3
+press ARP
+wait 1000
+release ARP
+expect par30 4
+press ARP
+wait 1000
+release ARP
+expect par30 5
+press ARP
+wait 1000
+release ARP
+expect par30 1
+expect par14 70
+expect par21 1
+# bass sounds 1..6: Sub, Triangle, Drone, Pulse, Void, Reactor (the types 0 1 2 3 4 5), then round to 1
+press LFO
+wait 1000
+release LFO
+expect par31 0
+press LFO
+wait 1000
+release LFO
+expect par31 1
+press LFO
+wait 1000
+release LFO
+expect par31 2
+press LFO
+wait 1000
+release LFO
+expect par31 3
+press LFO
+wait 1000
+release LFO
+expect par31 4
+press LFO
+wait 1000
+release LFO
+expect par31 5
+press LFO
+wait 1000
+release LFO
+expect par31 0
+expect par23 0
+expect par24 30

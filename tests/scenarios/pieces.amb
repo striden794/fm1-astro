@@ -1,62 +1,63 @@
+# (the recipe numbers quoted in the comments below are the old SAMSARA pieces'; the expectations are the sci-fi ones')
 # the pieces: PRESETS picks one, each remembers its settings, SAVE held resets one, all saved
-# (SAMSARA's four: Samsara, Maranasati, Anatta, Nirvana)
+# (SAMSARA's four: Cryosleep, Derelict, Hyperlane, Terraform)
 wait 500
 expect piece 0
-# Samsara's pad down (the Pad page: ENV)
+# Cryosleep's pad down (the Pad page: ENV)
 tap ENV
 spin K1 -10
-expect par0 50
-# the next piece: Maranasati, its recipe (tempo 70, the Ground at 35, bells 60, Bb Mixolydian)
+expect par0 55
+# the next piece: Derelict, its recipe (tempo 70, the Ground at 35, bells 60, Bb Mixolydian)
 turn PRESET 1
 expect piece 1
-expect par18 70
-expect par3 35
-expect par1 60
-expect par19 10
-expect pool 0x6B5
+expect par18 52
+expect par3 15
+expect par1 50
+expect par19 3
+expect pool 0x5AB
 wait 20000
 shot maranasati.png
 expect pad_level >10
-# the pad's colour (the Pad page's fourth knob), kept with the piece (Maranasati starts as Voices)
-expect par22 1
+# the pad's colour (the Pad page's fourth knob), kept with the piece (Derelict starts as Voices)
+expect par22 5
 spin K4 -1
-expect par22 0
+expect par22 4
 wait 3000
-# and Anatta (tempo 84, G Lydian), Nirvana (tempo 64, no Ground, E pentatonic major)
+# and Hyperlane (tempo 84, G Lydian), Terraform (tempo 64, no Ground, E pentatonic major)
 turn PRESET 1
 expect piece 2
-expect par18 84
+expect par18 96
 expect par19 7
 wait 8000
 shot anatta.png
 turn PRESET 1
 expect piece 3
-expect par18 64
-expect par3 0
+expect par18 68
+expect par3 30
 wait 8000
 shot nirvana.png
-# back to Samsara: as it was left (its pad's colour is the Choir, 2, since 2026-11-14)
+# back to Cryosleep: as it was left (its pad's colour is the Choir, 2, since 2026-11-14)
 turn PRESET -3
-expect par22 2
+expect par22 4
 expect piece 0
-expect par0 50
+expect par0 55
 spin K4 -1
-expect par22 1
+expect par22 3
 turn PRESET 1
-expect par22 0
+expect par22 4
 turn PRESET -1
-expect par22 1
-# SAVE held: Samsara's recipe again
+expect par22 3
+# SAVE held: Cryosleep's recipe again
 press SAVE
 wait 1700
 release SAVE
-expect par0 60
-expect par22 2
+expect par0 65
+expect par22 4
 expect store_writes 0
 # a tweak, saved, survives a reboot, on the piece it was made on (the Bells page: ARP)
 tap ARP
 spin K1 5
-expect par1 70
+expect par1 50
 turn PRESET 3
 expect piece 3
 tap SAVE
@@ -64,7 +65,9 @@ expect store_writes 1
 reboot
 wait 300
 expect piece 3
-# one past the last piece is the first again
+# one past the last piece is the first again (eight pieces: Perihelion, Aphelion, Horizon and Pulsar follow Terraform)
+turn PRESET 4
+expect piece 7
 turn PRESET 1
 expect piece 0
-expect par1 70
+expect par1 50

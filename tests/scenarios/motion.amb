@@ -12,10 +12,10 @@ expect frozen 0
 tap EDIT
 wait 4000
 tap OCT+
-expect par21 1
+expect par21 2
 tap ENV
 spin K1 -20
-expect par0 40
+expect par0 45
 tap PLAY
 wait 50
 expect playing 0
@@ -28,6 +28,6 @@ expect dirty 0
 expect store_writes >0
 reboot
 wait 300
-expect par0 40
-expect par21 1
+expect par0 45
+expect par21 2
 expect playing 1
