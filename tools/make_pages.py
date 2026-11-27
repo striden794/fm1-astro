@@ -133,8 +133,9 @@ def installer(pkg, version, out, conf, repo):
         (out / d).mkdir(parents=True)
     shutil.copy(pkg, out / "firmware" / name)
     page = (BASE / "web" / "installer.html").read_text(encoding="utf-8")
-    lib = strip_module((BASE / "web" / "fm1pkg.js").read_text(encoding="utf-8")) + "\n" + \
-        strip_module((BASE / "web" / "fm1ota.js").read_text(encoding="utf-8"))
+    # fm1ports.js first: fm1ota.js uses its PORT_NAMES (fm1-base's make_site inlines the three, in this order)
+    lib = "\n".join(strip_module((BASE / "web" / f).read_text(encoding="utf-8"))
+                    for f in ("fm1ports.js", "fm1pkg.js", "fm1ota.js"))
     # m-bootloader (MIT), which the installer offers to install after SAMSARA, with its licence (as fm1-base's make_site)
     boot = BASE / "web" / "m-bootloader" / f"fm1-uboot-{MBOOT_VERSION}.fwsc"
     boot_name = f"m-bootloader-{MBOOT_VERSION}.fwsc"
@@ -148,7 +149,8 @@ def installer(pkg, version, out, conf, repo):
         if page.count(mark) != 1:
             raise SystemExit(f"base/web/installer.html must contain {mark} once")
     for key, val in (("NAME", NAME), ("REPO", repo), ("REPO_SHORT", re.sub(r"^https?://", "", repo)),
-                     ("LICENSE", conf.get("licence", "MPL-2.0")), ("CREDITS", " " + conf.get("credits", ""))):
+                     ("LICENSE", conf.get("licence", "MPL-2.0")), ("CREDITS", " " + conf.get("credits", "")),
+                     ("RES", "SAMSARA's data"), ("RES_JA", "SAMSARA のデータ")):
         page = page.replace("{{" + key + "}}", val)
     # the firmware's own steps around an install (fm1.toml install_app; base/web/installer.html APP): none here
     app_js = (SRC / "app" / conf["install_app"]).read_text(encoding="utf-8") if conf.get("install_app") else "null"
@@ -182,9 +184,10 @@ def main(out, pkg=None, version=None):
                                     .replace("__TAGLINE__", html.escape(conf.get("tagline", ""), quote=True))
                                     .replace("__REPO__", repo), encoding="utf-8")
     emu = SRC / "app" / "build" / "emu"
-    if not (emu / "app.wasm").exists():
-        raise SystemExit("no app/build/emu/app.wasm: run ./build.sh --web (needs Emscripten)")
-    shutil.copytree(emu, out / "emu", ignore=shutil.ignore_patterns("o2", "web", "*.o"))   # (not the build's leftovers)
+    if (emu / "app.wasm").exists():
+        shutil.copytree(emu, out / "emu", ignore=shutil.ignore_patterns("o2", "web", "*.o"))   # (not the build's leftovers)
+    else:
+        print("note: no app/build/emu/app.wasm (./build.sh --web needs Emscripten): the site has no browser player")
     # the screen reader's words files (fm1-reader): every one ever made, for the devices that point at them
     shutil.copytree(SRC / "app" / "web" / "words", out / "words")
     (out / ".nojekyll").write_text("")
