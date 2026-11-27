@@ -43,7 +43,7 @@
 
 /* modes: pools relative to the root (bit i: root + i semitones) */
 enum { MODE_IONIAN, MODE_DORIAN, MODE_PHRYGIAN, MODE_LYDIAN, MODE_MIXOLYDIAN, MODE_AEOLIAN, MODE_PENT_MAJ,
-       MODE_PENT_MIN, EN_NMODES };
+       MODE_PENT_MIN, MODE_WHOLE, MODE_LYDDOM, EN_NMODES };
 extern const char *const EN_MODE_NAME[EN_NMODES];
 extern const uint16_t EN_MODE_POOL[EN_NMODES];
 extern const char *const EN_NOTE_NAME[12];
@@ -64,6 +64,7 @@ enum {
                                                        * the piece's own values (0: the piece as its recipe has it). Mood:
                                                        * dark .. bright, the pad's tone and the lean of the harmonic field.
                                                        * Space: dry and near .. wet and far, the reverb, the echo, the decay */
+    P_BELLTYPE, P_BASSTYPE,                           /* the sound of the bells (Chime, Glass, Plink, Wood, Gong, Crystal) and of the bass (Sub, Triangle, Drone, Pulse, Void, Reactor) */
     P_NPARAMS
 };
 typedef struct {
@@ -154,7 +155,7 @@ void en_voice_lead(const int *from, const int *pcs, int ntones, int *to, int lo,
 const char *en_chord_name(const int *pcs, int n, char *buf);   /* "Em7", "Dsus4", "C" ... */
 
 /* the pieces: recipes for every parameter (Tune and MIDI out included, but they are the player's) */
-#define EN_NPIECES 4
+#define EN_NPIECES 8
 const char *en_piece_name(int i);
 void en_piece(int i, int16_t *par, uint16_t *pool);
 

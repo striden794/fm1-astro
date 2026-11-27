@@ -32,11 +32,12 @@
 
 const char *const EN_NOTE_NAME[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
 const char *const EN_MODE_NAME[EN_NMODES] = {"Ionian", "Dorian", "Phrygian", "Lydian", "Mixolyd.", "Aeolian",
-                                             "Pent maj", "Pent min"};
+                                             "Pent maj", "Pent min", "Whole tn", "Lyd dom"};
 #define B(a, b, c, d, e, f, g) (1u << (a) | 1u << (b) | 1u << (c) | 1u << (d) | 1u << (e) | 1u << (f) | 1u << (g))
 const uint16_t EN_MODE_POOL[EN_NMODES] = {
     B(0, 2, 4, 5, 7, 9, 11), B(0, 2, 3, 5, 7, 9, 10), B(0, 1, 3, 5, 7, 8, 10), B(0, 2, 4, 6, 7, 9, 11),
-    B(0, 2, 4, 5, 7, 9, 10), B(0, 2, 3, 5, 7, 8, 10), B(0, 2, 4, 7, 9, 9, 9),  B(0, 3, 5, 7, 10, 10, 10)};
+    B(0, 2, 4, 5, 7, 9, 10), B(0, 2, 3, 5, 7, 8, 10), B(0, 2, 4, 7, 9, 9, 9),  B(0, 3, 5, 7, 10, 10, 10),
+    B(0, 2, 4, 6, 8, 10, 10), B(0, 2, 4, 6, 7, 9, 10)};   /* Whole tone, Lydian dominant: the space scales */
 #undef B
 const uint8_t EN_LOOP_LEN[EN_NLOOP] = {13, 17, 23, 29};
 const uint8_t EN_DRUM_N[EN_NDRUM] = {16, 12, 7};
@@ -47,10 +48,11 @@ static const en_param_t PARAMS[P_NPARAMS] = {
     {"Echo", 0, 100, 45},     {"Echo time", 0, 5, 3},   {"Reverb", 0, 100, 65},   {"Size", 0, 100, 80},
     {"Bright", 0, 100, 40},   {"Swell", 0, 100, 60},    {"Bell tone", 0, 100, 50}, {"Motion", 0, 100, 50},
     {"Tune", -50, 50, 0},     {"MIDI out", 0, 1, 1},    {"Tempo", 30, 120, 72},   {"Root", 0, 11, 2},
-    {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 2, 0},
+    {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 5, 0},
     {"Bass oct", -1, 1, 0},   {"Glide", 0, 100, 20},    {"Fifth", 0, 100, 35},
     {"Swing", 0, 100, 0},     {"Hats", 0, 100, 50},
     {"Mood", -50, 50, 0},     {"Space", -50, 50, 0},
+    {"Bell type", 0, 5, 0},   {"Bass type", 0, 5, 0},
 };
 const en_param_t *en_param_info(int i) { return (i >= 0 && i < P_NPARAMS) ? &PARAMS[i] : &PARAMS[0]; }
 
@@ -65,16 +67,22 @@ static const struct {
     const char *name;
     int8_t v[P_NPARAMS];
 } PIECES[EN_NPIECES] = {
-    /* SAMSARA's four (Tomorrow's Man's names, 2026-11-10), each from one of AMB-1's eight recipes as a starting point:
-     * Samsara is Garden's row unchanged (the piece every phase was tuned and judged on); Maranasati is Tides'
-     * (Phase 6c, 2026-11-11: of AMB-1's four unused recipes the one that measured most balanced and moving in this
-     * engine, out/phase6c/compare.md; it was Voices' with the Ground let in); Anatta is Afternoon's; Nirvana is
-     * Shoreline's. 2026-11-14 (Tomorrow's Man, TESTING #57: "Can the choir be the pad in Samsara and Nirvana?"): their pad's
-     * colour is the Choir (PT 2; both were Rhodes). */
-    {"Samsara",      {60, 65, 45, 40, 40, 35, 25, 35, 45, 3, 65, 80, 40, 60, 50, 50, 0, 1, 72, 2, 1, 0, 2, 0, 20, 35, 0, 50}},
-    {"Maranasati",   {55, 60, 40, 35, 45, 75, 10, 40, 50, 3, 65, 85, 60, 60, 55, 95, 0, 1, 70, 10, 4, 0, 1, 0, 25, 55, 10, 50}},
-    {"Anatta",       {50, 65, 35, 25, 55, 45, 20, 30, 50, 2, 60, 75, 60, 50, 60, 55, 0, 1, 84, 7, 3, 0, 0, 0, 15, 40, 15, 65}},
-    {"Nirvana",      {40, 60, 30, 0, 30, 40, 40, 0, 85, 4, 55, 95, 30, 80, 0, 85, 0, 1, 64, 4, 6, 0, 2, 0, 40, 20, 0, 30}},
+    /* the four sci-fi pieces that replaced SAMSARA's own four (Samsara, Maranasati, Anatta, Nirvana), not yet heard: a first
+     * guess from what the parameters mean. Cryosleep: A Aeolian, very slow, no Ground, a Glass pad, Crystal bells, a Void
+     * bass, a huge reverb. Derelict: Eb Phrygian, a dark Hollow pad, Gong bells, a Reactor bass, a faint pulse of the ship's
+     * own. Hyperlane: G Mixolydian, quick, an Aurora pad, Glass bells, a Pulse bass and the Ground driving. Terraform: C
+     * major pentatonic, warm and growing, a Voices pad, Wood bells, a Triangle bass. */
+    {"Cryosleep",    {65, 45, 35,  0, 20, 20, 15,  0, 55, 4, 85, 95, 30, 90, 70, 30, 0, 1, 44, 9, 5, 1, 4, 0, 40, 20, 0, 0, 0, 0, 5, 4}},
+    {"Derelict",     {60, 50, 55, 15, 25, 30, 30, 20, 50, 4, 80, 90, 20, 80, 35, 45, 0, 1, 52, 3, 2, -1, 5, 0, 30, 45, 0, 30, 0, 0, 4, 5}},
+    {"Hyperlane",    {55, 70, 50, 45, 60, 55, 45, 50, 55, 2, 60, 70, 65, 40, 70, 70, 0, 1, 96, 7, 4, 1, 3, 0, 15, 30, 0, 60, 0, 0, 1, 3}},
+    {"Terraform",    {60, 60, 45, 30, 45, 40, 35, 35, 45, 3, 65, 75, 50, 70, 45, 55, 0, 1, 68, 0, 6, 0, 1, 0, 25, 40, 10, 50, 0, 0, 3, 1}},
+    /* the space pieces (not yet heard: a first guess from what the parameters mean). Perihelion: D Lydian, Choir pad,
+     * bright bells, a long plate. Aphelion: Bb whole tone, sparse and cold, a Rhodes pad, high bells. Horizon: F Aeolian,
+     * Voices pad, a heavy Ground, dark and far. Pulsar: E Lydian dominant, quicker, more bells, Rhodes pad. */
+    {"Perihelion",   {55, 65, 40, 40, 40, 45, 20, 0, 55, 4, 75, 92, 55, 70, 65, 70, 0, 1, 60, 2, 3, 0, 3, 0, 30, 30, 0, 50, 0, 0, 0, 0}},
+    {"Aphelion",     {45, 55, 35, 45, 25, 50, 15, 0, 65, 5, 80, 95, 40, 80, 80, 60, 0, 1, 50, 10, 8, 0, 4, 0, 40, 20, 0, 50, 0, 0, 1, 0}},
+    {"Horizon",      {50, 40, 50, 60, 25, 30, 10, 0, 70, 4, 85, 95, 25, 85, 40, 45, 0, 1, 56, 5, 5, 0, 5, 0, 45, 35, 0, 50, 0, 0, 0, 2}},
+    {"Pulsar",       {40, 70, 45, 30, 55, 70, 30, 0, 50, 2, 65, 80, 65, 55, 70, 85, 0, 1, 84, 4, 9, 0, 0, 0, 20, 40, 0, 50, 0, 0, 3, 3}},
 };
 
 const char *en_piece_name(int i) { return PIECES[(unsigned)i < EN_NPIECES ? i : 0].name; }
@@ -120,7 +128,16 @@ void en_param_text(int i, int v, char *b)
     else if (i == P_MIDI)
         s = ONOFF[v ? 1 : 0];
     else if (i == P_PADTONE)
-        s = v == 2 ? "Choir" : v ? "Voices" : "Rhodes";
+    {
+        static const char *const PT[6] = {"Rhodes", "Voices", "Choir", "Aurora", "Glass", "Hollow"};
+        s = PT[(unsigned)v < 6u ? v : 0];
+    } else if (i == P_BELLTYPE) {
+        static const char *const BT[6] = {"Chime", "Glass", "Plink", "Wood", "Gong", "Crystal"};
+        s = BT[(unsigned)v < 6u ? v : 0];
+    } else if (i == P_BASSTYPE) {
+        static const char *const BS[6] = {"Sub", "Triangle", "Drone", "Pulse", "Void", "Reactor"};
+        s = BS[(unsigned)v < 6u ? v : 0];
+    }
     else if (i == P_MODE)
         s = EN_MODE_NAME[(unsigned)v < EN_NMODES ? v : 0];
     else if (i == P_ROOT)
@@ -620,7 +637,7 @@ typedef struct {
     float fc;                                   /* the pad bus's low-pass, octaves from the weather's */
 } anchor_t;
 #define NANCHOR 6
-#define NLAND 2
+#define NLAND 5
 static const anchor_t LAND[NLAND][NANCHOR] = {
     {   /* "Rhodes": AMB-1's Rhodes at the center, its neighbours around it */
         {"Rhodes", 0, 1.0f, 0.50f, 0.50f, 1.0f, 1.0f, 0.12f, 0.0f, 1.0f, 0.45f, 0.0f},
@@ -638,7 +655,32 @@ static const anchor_t LAND[NLAND][NANCHOR] = {
         {"Glass", 0, 2.0f, 0.80f, 0.15f, 0.7f, 1.2f, 0.05f, 0.0f, 1.0f, 0.45f, 0.2f},
         {"Rhodes", 0, 1.0f, 0.55f, 0.10f, 1.0f, 1.0f, 0.12f, 0.0f, 1.0f, 0.45f, 0.0f},
     },
+    {   /* "Aurora": a wide, warm wash, the Voices' formant colour with the saw all the way up (the space pad) */
+        {"Dawn", 1, 1.0f, 0.50f, 0.50f, 1.0f, 1.0f, 0.12f, 0.1f, 0.75f, 0.9f, 0.3f},
+        {"Haze", 1, 1.0f, 0.15f, 0.30f, 1.0f, 1.0f, 0.12f, -0.2f, 1.0f, 0.7f, 0.0f},
+        {"Ray", 1, 1.0f, 0.85f, 0.65f, 1.0f, 1.0f, 0.12f, 0.4f, 0.6f, 1.0f, 0.5f},
+        {"Veil", 1, 1.0f, 0.30f, 0.90f, 1.0f, 1.0f, 0.12f, 0.0f, 0.9f, 0.8f, 0.2f},
+        {"Bloom", 1, 1.0f, 0.80f, 0.15f, 1.0f, 1.0f, 0.12f, 0.3f, 0.7f, 0.95f, 0.4f},
+        {"Dusk", 1, 1.0f, 0.55f, 0.10f, 1.0f, 1.0f, 0.12f, -0.4f, 1.2f, 0.6f, -0.2f},
+    },
+    {   /* "Glass": cold FM, the modulator a ratio of 2, 3 or 4 up: hollow, bell-like overtones */
+        {"Ice", 0, 2.0f, 0.50f, 0.50f, 0.8f, 1.4f, 0.05f, 0.0f, 1.0f, 0.45f, 0.4f},
+        {"Shard", 0, 3.0f, 0.85f, 0.70f, 0.6f, 1.2f, 0.03f, 0.0f, 1.0f, 0.45f, 0.6f},
+        {"Frost", 0, 2.0f, 0.20f, 0.85f, 0.9f, 1.5f, 0.05f, 0.0f, 1.0f, 0.45f, 0.3f},
+        {"Star", 0, 3.5f, 0.80f, 0.20f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f, 0.45f, 0.5f},
+        {"Sleet", 0, 2.0f, 0.15f, 0.30f, 0.7f, 1.3f, 0.05f, 0.0f, 1.0f, 0.45f, 0.2f},
+        {"Crystal", 0, 4.0f, 0.55f, 0.95f, 0.6f, 1.1f, 0.02f, 0.0f, 1.0f, 0.45f, 0.5f},
+    },
+    {   /* "Hollow": odd harmonics, a low index, darker and softer: a distant organ or a hollow synth */
+        {"Hollow", 0, 3.0f, 0.50f, 0.50f, 0.5f, 1.0f, 0.0f, 0.0f, 1.0f, 0.45f, -0.1f},
+        {"Pipe", 0, 3.0f, 0.85f, 0.70f, 0.4f, 0.8f, 0.0f, 0.0f, 1.0f, 0.45f, -0.2f},
+        {"Flute", 0, 1.0f, 0.20f, 0.85f, 0.3f, 0.8f, 0.0f, 0.0f, 1.0f, 0.45f, -0.1f},
+        {"Organ", 0, 2.0f, 0.80f, 0.20f, 0.35f, 0.9f, 0.02f, 0.0f, 1.0f, 0.45f, -0.3f},
+        {"Drone", 0, 3.0f, 0.15f, 0.30f, 0.45f, 0.8f, 0.0f, 0.0f, 1.0f, 0.45f, -0.4f},
+        {"Void", 0, 3.0f, 0.55f, 0.10f, 0.55f, 1.0f, 0.0f, 0.0f, 1.0f, 0.45f, -0.3f},
+    },
 };
+static int pad_land_of(int v) { return v == 1 ? 1 : v >= 3 ? (v - 1 < NLAND ? v - 1 : NLAND - 1) : 0; }   /* the Colour's landscape (2 is the Choir) */
 static int land_now;                            /* the landscape (Pad tone, set by the piece) */
 static struct {
     walker_t sx, sy, wx, wy;                    /* the season's region and the weather's drift about it */
@@ -987,6 +1029,9 @@ typedef struct {
 } bell_t;
 static bell_t bell[NBELL];
 static float bell_vol, btone;
+static int btype, bass_type;                    /* the bells' and the bass' sound (P_BELLTYPE, P_BASSTYPE) */
+static float bass_ph2;                          /* the Void's second sine, a few cents off the first */
+static float bass_lp;                           /* the soft saw's and pulse's low-pass */
 static float bell_amt = 1.0f;                   /* the Bells knob's part of the count: (Bells / 65)^1.5, 1 at Garden's 65 */
 #define BELL_ACT 0.9f                           /* the activity walker's center, log2 of the count against Phase 5's
                                                  * (a first take at 0.5: 12 strikes in three minutes at the median, Phase 5's
@@ -1506,6 +1551,31 @@ static void bell_voice(int l, int n, float vel, int32_t wait)
      * 20-45 ms: at Garden's tone 11 ms at the loudest velocity (0.63), 22 ms at the softest; never slower than 80 ms */
     v->arate = fm_maxf((0.0004f + 0.0056f * fm_minf(tone * 2.0f, 1.0f)) / (1.0f + 5.0f * fm_clampf(1.0f - vel, 0.0f, 1.0f)),
                        1.0f / (0.08f * EN_SR));
+    if (btype == 1) {                           /* Glass: the metallic ratio, a long ring */
+        v->minc = v->cinc * 3.5f;
+        v->adec = fm_expf(-6.9f / (t60 * 1.5f * EN_SR));
+    } else if (btype == 2) {                    /* Plink: short and dry, a blip */
+        v->minc = v->cinc * 2.0f;
+        v->adec = fm_expf(-6.9f / (t60 * 0.2f * EN_SR));
+        v->idec = fm_expf(-6.9f / (0.15f * EN_SR));
+        v->amp *= 2.6f;                         /* (a short bell carries less: up to the Chime's level) */
+    } else if (btype == 3) {                    /* Wood: a marimba bar, a quick strike and decay */
+        v->minc = v->cinc * 4.0f;
+        v->idx *= 0.7f;
+        v->adec = fm_expf(-6.9f / (t60 * 0.35f * EN_SR));
+        v->idec = fm_expf(-6.9f / (0.25f * EN_SR));
+        v->arate *= 3.0f;
+        v->amp *= 1.8f;
+    } else if (btype == 4) {                    /* Gong: an inharmonic ratio, deep and long, a slow bloom */
+        v->minc = v->cinc * 1.41f;
+        v->adec = fm_expf(-6.9f / (t60 * 2.2f * EN_SR));
+        v->idx *= 1.2f;
+    } else if (btype == 5) {                    /* Crystal: a high, pure ring, the modulator a ratio of 5.19, gently struck */
+        v->minc = v->cinc * 5.19f;
+        v->idx *= 0.5f;
+        v->adec = fm_expf(-6.9f / (t60 * 1.8f * EN_SR));
+        v->idec = fm_expf(-6.9f / (1.2f * EN_SR));
+    }
     p = (LOOP_PAN[l] + 1.0f) * (FM_PI / 4.0f);
     v->gl = fm_cosf(p);
     v->gr = fm_sinf(p);
@@ -2019,9 +2089,11 @@ static void apply(int p, int v)
         break;
     case P_EVOLVE: evolve = (float)v * 0.01f; break;
     case P_BTONE: btone = (float)v * 0.01f; break;
+    case P_BELLTYPE: btype = v; break;
+    case P_BASSTYPE: bass_type = v; break;
     case P_PADTONE:                              /* the landscape: the voices cross over as they did for a new key */
         choir_on = v == 2;                       /* the Choir keeps the Rhodes landscape's cursor (the pad bus's filter) */
-        land_now = choir_on ? 0 : v < NLAND ? v : NLAND - 1;
+        land_now = choir_on ? 0 : pad_land_of(v);
         cursor_blend(1, 0.0f);
         {
             const int lo = pad_lo;
@@ -2186,7 +2258,7 @@ static void conductor_reset(void)               /* a new piece: the weather and 
     reg_now = 0;
     /* the timbre cursor (DESIGN section 4): a season's region, the weather's drift about it; from the center */
     choir_on = par[P_PADTONE] == 2;
-    land_now = !choir_on && par[P_PADTONE] >= 0 && par[P_PADTONE] < NLAND ? par[P_PADTONE] : 0;
+    land_now = choir_on ? 0 : pad_land_of(par[P_PADTONE]);
     pad_window();
     /* (the first 8 h render, 2026-11-09: a season of sd 0.22 within +-0.4 parked in a corner for hours and the weather
      * of sd 0.18 could not leave it, 3 anchors in 8 h; now the season shifts the region a little and the weather
@@ -3564,7 +3636,7 @@ static void render_bass(uint32_t n)
 {
     uint32_t j;
     const float g = bass_vol * 0.6f * cd.g[L_BASS], tgt = bass.lin;   /* AMB-1: 0.42 */
-    float ph = bass.ph, amp = bass.amp, inc;
+    float ph = bass.ph, ph2 = bass_ph2, amp = bass.amp, inc;
     if (amp < 1e-5f && tgt <= 0.0f) {
         bass.amp = 0.0f;
         en_bass_level = 0.0f;
@@ -3572,11 +3644,30 @@ static void render_bass(uint32_t n)
     }
     bass.note += (bass.target - bass.note) * fm_minf((float)n * glide_k, 1.0f);   /* Glide */
     inc = mtof(bass.note) * (1.0f / EN_SR);
+    const float lpa = fm_minf(25.0f * inc, 0.9f);
     for (j = 0; j < n; j++) {
-        float x = sine(ph) * 0.75f + sine(ph * 0.5f + 0.25f) * 0.45f + sine(ph * 2.0f) * 0.12f;
+        float x, t = ph - (float)(int)ph;
+        if (bass_type == 1)                      /* Triangle: round and hollow, with the sub-octave */
+            x = (t < 0.5f ? 4.0f * t - 1.0f : 3.0f - 4.0f * t) * 0.9f + sine(ph * 0.5f + 0.25f) * 0.3f;
+        else if (bass_type == 2) {               /* Drone: a saw, softened to a few times its pitch, over the sub */
+            bass_lp += ((2.0f * t - 1.0f) - bass_lp) * lpa;
+            x = bass_lp * 0.9f + sine(ph * 0.5f + 0.25f) * 0.45f;
+        } else if (bass_type == 3) {             /* Pulse: a soft square, over the sub */
+            bass_lp += ((t < 0.5f ? 1.0f : -1.0f) - bass_lp) * lpa;
+            x = bass_lp * 0.55f + sine(ph * 0.5f + 0.25f) * 0.45f;
+        } else if (bass_type == 4) {             /* Void: two sines a few cents apart, beating slowly, over the sub */
+            x = (sine(ph) + sine(ph2)) * 0.45f + sine(ph * 0.5f + 0.25f) * 0.4f;
+        } else if (bass_type == 5) {             /* Reactor: a saw and a square blended, softened, with the octave over it */
+            bass_lp += ((0.6f * (2.0f * t - 1.0f) + 0.4f * (t < 0.5f ? 1.0f : -1.0f)) - bass_lp) * lpa;
+            x = bass_lp * 0.6f + sine(ph * 0.5f + 0.25f) * 0.4f + sine(ph * 2.0f) * 0.1f;
+        } else                                   /* Sub: AMB-1's own */
+            x = sine(ph) * 0.75f + sine(ph * 0.5f + 0.25f) * 0.45f + sine(ph * 2.0f) * 0.12f;
         ph += inc;
         if (ph >= 2.0f)                          /* two turns: the sub-octave's period */
             ph -= 2.0f;
+        ph2 += inc * 1.0035f;
+        if (ph2 >= 2.0f)
+            ph2 -= 2.0f;
         amp += (tgt - amp) * 0.002f;             /* the level is already rate-limited: this only smooths */
         x *= amp * g;
         lyl[j] += x;
@@ -3584,6 +3675,7 @@ static void render_bass(uint32_t n)
         rsend[j] += x * 0.08f;
     }
     bass.ph = ph;
+    bass_ph2 = ph2;
     bass.amp = amp;
     en_bass_level = amp;
 }
