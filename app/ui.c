@@ -21,9 +21,9 @@
 #include "fastmath.h"
 
 /* the pages, one a layer (a button each); SELECT steps through them in this order */
-enum { V_GARDEN, V_PAD, V_BELLS, V_BASS, V_PULSE, V_SPACE, V_SETUP, NVIEWS };
-static const char *const VIEW_NAME[NVIEWS] = {"Tide", "Pad", "Bells", "Bass", "Ground", "Space", "Setup"};
-static const uint8_t VIEW_BTN[NVIEWS] = {B_HOME, B_ENV, B_ARP, B_LFO, B_SEQ, B_FX, B_GLO};
+enum { V_GARDEN, V_PAD, V_BELLS, V_BASS, V_PULSE, V_SPACE, V_SETUP, V_SOUND, NVIEWS };
+static const char *const VIEW_NAME[NVIEWS] = {"Tide", "Pad", "Bells", "Bass", "Ground", "Space", "Setup", "Sounds"};
+static const uint8_t VIEW_BTN[NVIEWS] = {B_HOME, B_ENV, B_ARP, B_LFO, B_SEQ, B_FX, B_GLO, B_ENV};
 /* the four knobs of each page: a parameter, or one of these; and what the knob is called there */
 enum { K_LEDS = 100, K_CPU, K_NONE };
 static const uint8_t VIEW_KNOB[NVIEWS][4] = {
@@ -34,6 +34,7 @@ static const uint8_t VIEW_KNOB[NVIEWS][4] = {
     {P_PULSE, P_MOTION, P_TEMPO, K_NONE},         /* Ground's level (the pulse's slot); the old Garden page's two */
     {P_ECHO, P_ETIME, P_REVERB, P_SIZE},
     {P_ROOT, P_TUNE, P_MIDI, K_LEDS},
+    {P_PADTONE, P_BELLTYPE, P_BASSTYPE, K_NONE},   /* SOUNDS: the pad's colour, the bells' and the bass' sound; a layer's button again */
 };
 static const char *const KNOB_LABEL[NVIEWS][4] = {
     {"Mood", "Density", "Drift", "Space"},
@@ -43,6 +44,7 @@ static const char *const KNOB_LABEL[NVIEWS][4] = {
     {"Level", "Motion", "Tempo", ""},
     {"Echo", "Echo time", "Reverb", "Size"},
     {"Root", "Tune", "MIDI out", "Lights"},
+    {"Pad", "Bells", "Bass", ""},
 };
 
 /* the screen's colours: the cover of Ambient 1: Music for Airports (1978), as the web app and the site.
@@ -50,22 +52,28 @@ static const char *const KNOB_LABEL[NVIEWS][4] = {
  * bells; the bass and the pulse in darker inks. Each layer has a pale tint for the shapes at rest. */
 /* SAMSARA's colours (Tomorrow's Man, 2026-11-10): the lapis blue and the gold of Tibetan painting. AMB-1's were a pale
  * yellow ground with green and teal. */
-#define K_BG RGB(12, 26, 74)
-#define K_PANEL RGB(22, 42, 104)
-#define K_LINE RGB(50, 74, 138)
-#define K_DIM RGB(132, 150, 196)
-#define K_TEXT RGB(244, 218, 146)
-#define K_ACC RGB(234, 180, 60)          /* the accent: the page, the knob being turned, a message's word */
-#define K_BELL RGB(246, 202, 84)
-#define K_BELL_T RGB(98, 88, 76)
-#define K_PAD RGB(168, 200, 242)
-#define K_PAD_T RGB(44, 70, 128)
-#define K_PULSE RGB(198, 142, 46)
-#define K_PULSE_T RGB(72, 64, 70)
-#define K_BASS RGB(78, 128, 208)
-#define K_BASS_T RGB(30, 54, 116)
-#define K_FROST RGB(116, 204, 222)
-#define K_FROST_T RGB(36, 82, 116)
+/* the deep-space palette (replaces SAMSARA's lapis and gold): near-black ground, cold cyan accent, violet bells */
+#define K_BG RGB(4, 6, 18)
+#define K_PANEL RGB(12, 18, 44)
+#define K_LINE RGB(34, 48, 94)
+#define K_DIM RGB(116, 134, 182)
+#define K_TEXT RGB(214, 232, 255)
+#define K_ACC RGB(92, 214, 238)          /* the accent: the page, the knob being turned, a message's word */
+#define K_BELL RGB(236, 238, 244)          /* the bells: little moons, grey to white */
+#define K_BELL_T RGB(78, 82, 98)
+#define K_SUN RGB(255, 214, 120)            /* the star in the middle */
+#define K_SUN_T RGB(130, 64, 22)
+#define K_PL0 RGB(236, 124, 72)             /* the pad's planets: rust, ocean, jade */
+#define K_PL1 RGB(86, 158, 255)
+#define K_PL2 RGB(108, 216, 168)
+#define K_PAD RGB(118, 188, 255)
+#define K_PAD_T RGB(22, 42, 100)
+#define K_PULSE RGB(214, 130, 255)
+#define K_PULSE_T RGB(60, 38, 88)
+#define K_BASS RGB(62, 112, 224)
+#define K_BASS_T RGB(18, 34, 92)
+#define K_FROST RGB(226, 242, 255)
+#define K_FROST_T RGB(60, 84, 126)
 
 static struct {
     uint8_t view;
@@ -75,6 +83,7 @@ static struct {
     uint32_t down_t[NB];               /* when each button went down */
     uint32_t turn_t;                   /* the last knob turn */
     uint8_t help;                      /* a button's card is up: the button + 1 */
+    uint8_t snd[3];                    /* the pad's, the bells' and the bass' last picked sound + 1 (0: none yet) */
     uint8_t reset_done;                /* SAVE held: the piece went back to its recipe this hold */
     uint8_t dirty;                     /* the project changed since the last save */
     uint32_t act_t, saved_t;
@@ -341,6 +350,10 @@ static void set_view(int v)
 static void button(int b)
 {
     int v;
+    if ((b == B_ENV && ui.view == V_PAD) || (b == B_ARP && ui.view == V_BELLS) || (b == B_LFO && ui.view == V_BASS)) {
+        set_view(V_SOUND);                       /* the page's button again: the sounds of the pad, the bells and the bass */
+        return;
+    }
     for (v = 0; v < NVIEWS; v++)                 /* a page's button: its page */
         if (VIEW_BTN[v] == b) {
             set_view(v);
@@ -406,6 +419,36 @@ static void midi_in(void)
  * its press, and SEL has no job here: neither has a card. */
 #define HELP_HOLD 900u
 #define RESET_HOLD 1500u
+/* SOUNDS: four complete sounds for each of the pad, the bells and the bass (a type with its tone, octave, brightness...),
+ * a held page button steps them and its card says which: the layer by the button (ENV, ARP, LFO) */
+static const uint8_t SND_N[3] = {4, 6, 6};          /* how many complete sounds each layer has */
+static const char *const SND_NAME[3][6] = {
+    {"AURORA WASH", "GLASS HALL", "DISTANT ORGAN", "DEEP CHOIR"},
+    {"STARLIGHT", "SOFT CHIMES", "SONAR", "DRY WOOD", "DEEP GONG", "CRYSTAL"},
+    {"DEEP SUB", "HOLLOW TRIANGLE", "SLOW DRONE", "SOFT PULSE", "VOID", "REACTOR"},
+};
+static const char *const SND_DESC[3][6] = {
+    {"WIDE, WARM SAW WASH", "COLD FM, BELL OVERTONES", "HOLLOW, DARK AND FAR", "SLOW, SUNG VOWELS"},
+    {"HIGH, LONG, GLASSY", "THE CLASSIC BELL", "SHORT, DRY BLIPS", "LOW, QUICK MARIMBA", "DEEP, LONG BLOOM", "HIGH, PURE RING"},
+    {"PURE, LOW SINE", "ROUND AND HOLLOW", "LOW, SOFT SAW", "SOFT SQUARE", "BEATING, VERY LOW", "SAW AND SQUARE"},
+};
+static const uint8_t SND_PAR[3][3] = {{P_PADTONE, P_BRIGHT, P_SWELL}, {P_BELLTYPE, P_BTONE, P_BOCT}, {P_BASSTYPE, P_BASSOCT, P_GLIDE}};
+static const int8_t SND_VAL[3][6][3] = {
+    {{3, 60, 70}, {4, 70, 80}, {5, 25, 85}, {2, 30, 90}},       /* Aurora, Glass, Hollow, Choir; bright, swell */
+    {{1, 70, 1}, {0, 40, 0}, {2, 55, 0}, {3, 30, -1}, {4, 35, -1}, {5, 75, 1}},   /* Glass, Chime, Plink, Wood, Gong, Crystal; tone, octave */
+    {{0, 0, 30}, {1, 0, 20}, {2, -1, 50}, {3, 0, 10}, {4, -1, 40}, {5, 0, 15}},   /* Sub, Triangle, Drone, Pulse, Void, Reactor; octave, glide */
+};
+static int snd_layer(int b) { return b == B_ENV ? 0 : b == B_ARP ? 1 : 2; }
+static void cycle_sound(int b)
+{
+    const int l = snd_layer(b), n = ui.snd[l] % SND_N[l];     /* the next of its sounds (the first, if none yet) */
+    int j;
+    for (j = 0; j < 3; j++)
+        knob_set(SND_PAR[l][j], SND_VAL[l][n][j]);
+    ui.snd[l] = (uint8_t)(n + 1);
+    ui.help = (uint8_t)(b + 1);                  /* the card: it goes when the button does */
+}
+
 static void help_tick(uint32_t btn, uint32_t keys)
 {
     uint32_t now = plat_ms();
@@ -418,6 +461,14 @@ static void help_tick(uint32_t btn, uint32_t keys)
     }
     if (!btn || (btn & (btn - 1u)) || keys)
         return;
+    if (btn == 1u << B_ENV || btn == 1u << B_ARP || btn == 1u << B_LFO) {   /* these three have no card: held, they change the sound */
+        const int b = btn == 1u << B_ENV ? B_ENV : btn == 1u << B_ARP ? B_ARP : B_LFO;
+        if (!(ui.btn_used & btn) && now - ui.down_t[b] >= HELP_HOLD && (int32_t)(ui.turn_t - ui.down_t[b]) <= 0) {
+            ui.btn_used |= btn;                  /* its release now does nothing */
+            cycle_sound(b);
+        }
+        return;
+    }
     for (i = 0; i < NB; i++)
         if (btn == 1u << i && i != B_PLAY && i != B_SEL && !(ui.btn_used & btn) && now - ui.down_t[i] >= HELP_HOLD &&
             (int32_t)(ui.turn_t - ui.down_t[i]) <= 0) {
@@ -600,7 +651,7 @@ static float turns(float y, float x)
  * the start (or from the top, for a centred value) and a round handle */
 static void arc(int32_t cx, int32_t cy, int32_t r, float v, uint16_t track, uint16_t fill, uint16_t bg, int bipolar)
 {
-    const float th = 3.4f, a0 = 0.375f, sweep = 0.75f;
+    const float th = 1.6f, a0 = 0.375f, sweep = 0.75f;      /* a thin ring (3.4: the broad arc) */
     float ro = (float)r, ri = ro - th, rm = ro - th * 0.5f, fx = (float)cx + 0.5f, fy = (float)cy + 0.5f, lo, hi;
     int32_t x, y;
     v = fm_clampf(v, 0.0f, 1.0f);
@@ -627,8 +678,8 @@ static void arc(int32_t cx, int32_t cy, int32_t r, float v, uint16_t track, uint
         disc(fx + fm_cosf(e1) * rm - 0.5f, fy + fm_sinf(e1) * rm - 0.5f, th * 0.5f, hi >= 1.0f ? fill : track);
         if (hi > lo)
             disc(fx + fm_cosf(el) * rm - 0.5f, fy + fm_sinf(el) * rm - 0.5f, th * 0.5f, fill);
-        disc(fx + fm_cosf(ev) * rm - 0.5f, fy + fm_sinf(ev) * rm - 0.5f, th * 0.5f + 1.3f, bg);
-        disc(fx + fm_cosf(ev) * rm - 0.5f, fy + fm_sinf(ev) * rm - 0.5f, th * 0.5f + 0.6f, fill);
+        disc(fx + fm_cosf(ev) * rm - 0.5f, fy + fm_sinf(ev) * rm - 0.5f, th * 0.5f + 2.0f, bg);
+        disc(fx + fm_cosf(ev) * rm - 0.5f, fy + fm_sinf(ev) * rm - 0.5f, th * 0.5f + 1.3f, fill);
     }
 }
 
@@ -827,28 +878,21 @@ static const char *chord_now(char *nm)          /* the chord's name, as the gard
  * into the wedge between one spoke and the next, where it is near one of two axes. One square root a pixel. */
 static int32_t tide_px(void);
 #define WH_RIM 33.0f                            /* the ring of twelve's radius (24 until TESTING #40: "larger") */
-#define WH_S (WH_RIM / 24.0f)                    /* the wheel was drawn at 24: hub, eye and spokes grow with it */
-#define WH_HUB (6.5f * WH_S)
-static float wh_spoke(float al, float ac)       /* along a spoke's axis from the middle, and across it: coverage 0..1 */
-{
-    const float base = WH_HUB - 1.5f * WH_S, tip = WH_RIM - 0.5f, belly = 0.64f;   /* widest two thirds of the way out */
-    float t = (al - base) / (tip - base), w;
-    if (t <= 0.0f || t >= 1.0f)
-        return 0.0f;
-    w = WH_S * (t < belly ? 0.8f + 2.0f * (t / belly) : 2.8f * (1.0f - t) / (1.0f - belly));
-    return fm_clampf(w - ac + 0.5f, 0.0f, 1.0f);
-}
-
+/* the centre: a star. A white-hot core, a warm glow and eight rays (four long, four short) that turn slowly with the drift. */
 static void draw_wheel(float turn, uint16_t c)
 {
-    float a = turn * (FM_TWO_PI / 8.0f), cs = fm_cosf(a), sn = fm_sinf(a);
+    const float a = turn * (FM_TWO_PI / 8.0f), cs = fm_cosf(a), sn = fm_sinf(a), pr = WH_RIM * 0.26f, gr = WH_RIM * 0.62f;
     int32_t x, y, R = (int32_t)WH_RIM + 2;
     for (y = -R; y <= R; y++)
         for (x = -R; x <= R; x++) {
-            float fx = (float)x, fy = (float)y, d2 = fx * fx + fy * fy, d, u, v, cov, k;
+            float fx = (float)x, fy = (float)y, d2 = fx * fx + fy * fy, d, u, v, k, cov, g;
             if (d2 > (WH_RIM + 2.0f) * (WH_RIM + 2.0f))
                 continue;
             d = fm_sqrtf(d2);
+            if (d < gr) {                                                    /* the glow: soft, falling off to nothing */
+                g = 1.0f - d / gr;
+                px_blend(CX + x, CY + y, c, (uint32_t)(g * g * 9.0f + 0.5f));
+            }
             u = fm_fabsf(fx * cs + fy * sn);
             v = fm_fabsf(fy * cs - fx * sn);
             if (v > u) {
@@ -856,13 +900,18 @@ static void draw_wheel(float turn, uint16_t c)
                 u = v;
                 v = k;
             }
-            cov = wh_spoke(u, v);                                                   /* the spoke on the wedge's near side */
-            k = wh_spoke((u + v) * 0.70710678f, (u - v) * 0.70710678f);             /* and the one 45 degrees on */
-            cov = fm_maxf(cov, k);
-            cov = fm_maxf(cov, fm_clampf(WH_HUB + 0.5f - d, 0.0f, 1.0f));           /* the hub */
-            cov *= fm_clampf(d - 2.5f * WH_S + 0.5f, 0.0f, 1.0f);                         /* its eye */
-            cov = fm_maxf(cov, 0.75f * fm_clampf(1.2f - fm_fabsf(d - WH_RIM), 0.0f, 1.0f));   /* the rim, under the notes */
-            px_blend(CX + x, CY + y, c, (uint32_t)(cov * 16.0f + 0.5f));
+            cov = 0.0f;
+            if (u > pr * 0.5f && u < WH_RIM * 0.92f)                          /* the long rays, on the axes */
+                cov = fm_clampf(1.1f * (1.0f - u / (WH_RIM * 0.92f)) - v + 0.5f, 0.0f, 1.0f);
+            k = (u + v) * 0.70710678f;
+            if (k > pr * 0.5f && k < WH_RIM * 0.6f)                           /* the short ones, between */
+                cov = fm_maxf(cov, 0.8f * fm_clampf(0.9f * (1.0f - k / (WH_RIM * 0.6f)) - fm_fabsf(u - v) * 0.70710678f + 0.5f, 0.0f, 1.0f));
+            if (cov > 0.0f)
+                px_blend(CX + x, CY + y, c, (uint32_t)(cov * 16.0f + 0.5f));
+            cov = fm_clampf(pr + 0.5f - d, 0.0f, 1.0f);                       /* the core, white at its middle */
+            if (cov > 0.0f)
+                px_blend(CX + x, CY + y, mix(K_SUN, K_FROST, (int)(16.0f * (1.0f - d / pr) + 0.5f)), (uint32_t)(cov * 16.0f + 0.5f));
+            px_blend(CX + x, CY + y, K_LINE, (uint32_t)(0.9f * fm_clampf(1.2f - fm_fabsf(d - WH_RIM), 0.0f, 1.0f) * 16.0f + 0.5f));   /* the orbit, under the notes */
         }
 }
 
@@ -872,14 +921,14 @@ static void draw_ring(void)
     int i, l;
     for (i = 0; i < EN_NPAD; i++)
         chord |= 1u << (en_chord[i] % 12u);
-    draw_wheel(en_drift, mix(K_BELL_T, K_ACC, 5 + 11 * tide_px() / 80));   /* its gold sinks with the tide */
+    draw_wheel(en_drift, mix(K_SUN_T, K_SUN, 5 + 11 * tide_px() / 80));   /* its glow sinks with the tide */
     for (l = 0; l < EN_NLOOP; l++) {
         int len = EN_LOOP_LEN[l], s, pos = en_loop_pos[l], g = q16(en_loop_glow[l]);
         for (s = 0; s < len; s++) {
             int32_t x, y;
             polar(CX, CY, (float)LOOP_R[l], s, len, &x, &y);
             if (en_loop_note[l][s] >= 0)
-                cv_disc(x, y, 2, (s == pos && en_playing) ? mix(K_BELL, K_FROST, g / 2) : mix(K_BELL_T, K_BELL, 12));
+                cv_disc(x, y, (s == pos && en_playing) ? 3 : 2, (s == pos && en_playing) ? K_FROST : mix(K_BELL_T, K_BELL, 12));
             else
                 cv_rect(x, y, 2, 2, K_LINE);
         }
@@ -891,16 +940,24 @@ static void draw_ring(void)
     }
     for (i = 0; i < 12; i++) {                  /* the scale: C at the top */
         int32_t x, y;
-        int in = (int)(abs_pool >> i & 1u), ch = (int)(chord >> i & 1u);
+        int in = (int)(abs_pool >> i & 1u);
         polar(CX, CY, WH_RIM, i, 12, &x, &y);
         if (i == (int)(en_field_pool ? en_field_root % 12u : (uint32_t)proj.par[P_ROOT]))
             cv_disc(x, y, 5, K_TEXT);           /* the field's root: ringed in ink */
-        if (ch)
-            cv_disc(x, y, 4, mix(K_PAD_T, K_PAD, 6 + q16(en_pad_level) * 10 / 16));
-        else if (in)
-            cv_disc(x, y, 3, mix(K_PAD_T, K_PAD, 7));
-        else
+        if (in && !(chord >> i & 1u))
+            cv_disc(x, y, 2, mix(K_LINE, K_DIM, 8));   /* a note of the scale: a faint star */
+        else if (!(chord >> i & 1u))
             cv_disc(x, y, 1, K_LINE);
+    }
+    {   /* the chord: a planet a pad voice, each its own colour, brighter as the pad swells */
+        static const uint16_t PL[3] = {K_PL0, K_PL1, K_PL2};
+        for (i = 0; i < EN_NPAD; i++) {
+            int32_t x, y;
+            const uint16_t pc = PL[i % 3];
+            polar(CX, CY, WH_RIM, (int)(en_chord[i] % 12u), 12, &x, &y);
+            cv_disc(x, y, 4, mix(K_PANEL, pc, 6 + q16(en_pad_level) * 10 / 16));
+            cv_rect(x - 2, y - 2, 1, 1, mix(pc, K_FROST, 9));      /* a glint, upper left */
+        }
     }
     {   /* the chord's name, over the wheel (AMB-1 and TIDE had it in the middle, where the hub is now) */
         char nm[16];
@@ -957,9 +1014,26 @@ static int help_lines(int b, const char *l[HELP_LINES])
 #define L(t) (l[n++] = (t))
     switch (b) {
     case B_HOME: L("TIDE"); L("MOOD, DENSITY, DRIFT, SPACE"); L("DRIFT FULLY DOWN: HOLD"); L("+ SELECT: TEMPO"); break;
-    case B_ENV: L("THE PAD"); L("LEVEL, SWELL, BRIGHT,"); L("COLOUR"); break;
-    case B_ARP: L("THE BELLS"); L("AMOUNT, TONE, OCTAVE,"); L("EVOLVE"); break;
-    case B_LFO: L("THE BASS"); L("LEVEL, OCTAVE, GLIDE, FIFTH"); break;
+    case B_ENV:
+    case B_ARP:
+    case B_LFO: {                                /* held: the sound picked (snd), or what a hold does */
+        static char cnt[3][10];            /* "1 OF 6" */
+        const int ly = snd_layer(b), p = ui.snd[ly];
+        if (!p) {
+            L("PICK A SOUND");
+            L("HOLD: THE NEXT ONE");
+        } else {
+            cnt[ly][0] = (char)('0' + p);
+            memcpy(cnt[ly] + 1, " OF ", 4);
+            cnt[ly][5] = (char)('0' + SND_N[ly]);
+            cnt[ly][6] = 0;
+            L(SND_NAME[ly][p - 1]);
+            L(cnt[ly]);
+            L(SND_DESC[ly][p - 1]);
+            L("HOLD AGAIN: THE NEXT");
+        }
+        break;
+    }
     case B_SEQ: L("THE GROUND"); L("LEVEL, MOTION, TEMPO"); break;
     case B_FX: L("THE SPACE"); L("ECHO, ECHO TIME, REVERB,"); L("SIZE"); break;
     case B_GLO: L("SETUP"); L("ROOT, TUNE, MIDI OUT, LIGHTS"); break;
@@ -974,6 +1048,11 @@ static int help_lines(int b, const char *l[HELP_LINES])
     return n;
 }
 
+static const char *card_title(int b)
+{
+    return b == B_ENV ? "PAD SOUND" : b == B_ARP ? "BELL SOUND" : b == B_LFO ? "BASS SOUND" : BTN_LABEL[b];
+}
+
 static void draw_help(void)
 {
     const char *l[HELP_LINES];
@@ -981,7 +1060,7 @@ static void draw_help(void)
     cv_round(16, 14, 208, 116, 6, K_PANEL);
     cv_round(16, 14, 208, 26, 6, K_TEXT);
     cv_rect(16, 34, 208, 6, K_TEXT);
-    text_c(120, 18, &FONT_B, BTN_LABEL[ui.help - 1], K_BG);
+    text_c(120, 18, &FONT_B, card_title(ui.help - 1), K_BG);
     for (k = 0; k < n; k++)
         text_c(120, 56 + k * 20, &FONT_S, l[k] + (l[k][0] == ' '), K_TEXT);
 }
@@ -993,7 +1072,7 @@ static void draw_main(void)
     if (ui.frame % 3u)                           /* the garden moves slowly: 20 frames a second is plenty */
         return;
     if (ui.help) {
-        h = hash(0x48454C50u, ui.help);
+        h = hash(hash(hash(hash(0x48454C50u, ui.help), ui.snd[0]), ui.snd[1]), ui.snd[2]);
         if (h != ui.sig[1]) {
             ui.sig[1] = h;
             cv_begin(240, MAIN_H, K_BG);
@@ -1084,7 +1163,7 @@ static void draw_knobs(void)
             for (j = 0; j < n; j++)
                 cv_round(cx - w0 / 2 + j * (pw + gap), 33, pw, 8, 2, j == v - lo ? fill : K_LINE);
         } else if (k != K_CPU) {
-            arc(cx, 37, 12, hi > lo ? (float)(v - lo) / (float)(hi - lo) : 0.0f, K_LINE, fill, bg, lo < 0);
+            arc(cx, 37, 13, hi > lo ? (float)(v - lo) / (float)(hi - lo) : 0.0f, K_LINE, fill, bg, lo < 0);
         }
         knob_text(k, t);
         text_c(cx, 50, &FONT_B, t, hot ? K_ACC : K_TEXT);
@@ -1306,8 +1385,9 @@ static void sp_help(void)
     int n = help_lines(ui.help - 1, l), k;
     sp_n = 0;
     sp_buf[0] = 0;
-    sp_cat(BTN_LABEL[ui.help - 1]);
-    sp_cat(" button");
+    sp_cat(card_title(ui.help - 1));
+    if (ui.help - 1 != B_ENV && ui.help - 1 != B_ARP && ui.help - 1 != B_LFO)
+        sp_cat(" button");
     for (k = 0; k < n; k++)
         sp_line(l[k]);
 }

@@ -11,6 +11,8 @@ EXT	external clock
 Mixolyd.	Mixolydian
 Mixolyd	Mixolydian
 Pent maj	pentatonic major
+Whole tn	whole tone
+Lyd dom	Lydian dominant
 Pent min	pentatonic minor
 ECHO, ECHO TIME	echo amount, echo time
 Lights Keys	lights on the keys only
