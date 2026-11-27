@@ -8,10 +8,9 @@
 #include "plat.h"
 #include "amb.h"
 
-#define APP_NAME "SAMSARA"
-#define APP_TAGLINE "FOR BRETT"          /* the dedication, under the name on the start-up screen (Tomorrow's Man, TESTING #60,
-                                          * 2026-11-16: "the words 'for Brett' on the screen"); capitals: the small
-                                          * face has no lower case in this build */
+#define APP_NAME "STARDRIFT"             /* the start-up screen's name, and the crash, safe-mode and screen-reader ones (SAMSARA: the original) */
+#define APP_TAGLINE "GENERATIVE SPACE AMBIENCE"   /* under the name on the start-up screen; capitals: the small face has no
+                                          * lower case in this build (the original's was a dedication: "FOR BRETT") */
 #define APP_BLOCK 256u                   /* frames per audio block: 5.8 ms at 44.1 kHz */
 #ifdef APP_VERSION                       /* a release build passes its own (tools/build.py --release) */
 #define EN_VERSION APP_VERSION
