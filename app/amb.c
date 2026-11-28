@@ -52,7 +52,7 @@ static const en_param_t PARAMS[P_NPARAMS] = {
     {"Bass oct", -1, 1, 0},   {"Glide", 0, 100, 20},    {"Fifth", 0, 100, 35},
     {"Swing", 0, 100, 0},     {"Hats", 0, 100, 50},
     {"Mood", -50, 50, 0},     {"Space", -50, 50, 0},
-    {"Bell type", 0, 5, 0},   {"Bass type", 0, 5, 0},
+    {"Bell type", 0, 10, 0},   {"Bass type", 0, 8, 0},
 };
 const en_param_t *en_param_info(int i) { return (i >= 0 && i < P_NPARAMS) ? &PARAMS[i] : &PARAMS[0]; }
 
@@ -132,11 +132,11 @@ void en_param_text(int i, int v, char *b)
         static const char *const PT[7] = {"Rhodes", "Voices", "Choir", "Aurora", "Glass", "Hollow", "Abyss"};
         s = PT[(unsigned)v < 7u ? v : 0];
     } else if (i == P_BELLTYPE) {
-        static const char *const BT[6] = {"Chime", "Glass", "Plink", "Wood", "Gong", "Crystal"};
-        s = BT[(unsigned)v < 6u ? v : 0];
+        static const char *const BT[11] = {"Chime", "Glass", "Plink", "Wood", "Gong", "Crystal", "Bowl", "Steel", "Beacon", "Saw", "Square"};
+        s = BT[(unsigned)v < 11u ? v : 0];
     } else if (i == P_BASSTYPE) {
-        static const char *const BS[6] = {"Sub", "Triangle", "Drone", "Pulse", "Void", "Reactor"};
-        s = BS[(unsigned)v < 6u ? v : 0];
+        static const char *const BS[9] = {"Sub", "Triangle", "Drone", "Pulse", "Void", "Reactor", "Hum", "Thrum", "Breath"};
+        s = BS[(unsigned)v < 9u ? v : 0];
     }
     else if (i == P_MODE)
         s = EN_MODE_NAME[(unsigned)v < EN_NMODES ? v : 0];
@@ -1031,13 +1031,14 @@ static float bass_vol, glide_k = 1.0f / (0.25f * EN_SR);      /* glide_k: 1 / th
 /* ----------------------------------------------------------------- bells --- */
 #define NBELL 6
 typedef struct {
-    float cph, mph, cinc, minc, amp, adec, idx, idec, att, arate, gl, gr;
+    float cph, mph, cinc, minc, amp, adec, idx, idec, att, arate, gl, gr, lp;
     int32_t wait;
     uint8_t on, note, loop;
 } bell_t;
 static bell_t bell[NBELL];
 static float bell_vol, btone;
 static int btype, bass_type;                    /* the bells' and the bass' sound (P_BELLTYPE, P_BASSTYPE) */
+static float bass_lf;                           /* the Breath's swell, in turns */
 static float bass_ph2;                          /* the Void's second sine, a few cents off the first */
 static float bass_lp;                           /* the soft saw's and pulse's low-pass */
 static float bell_amt = 1.0f;                   /* the Bells knob's part of the count: (Bells / 65)^1.5, 1 at Garden's 65 */
@@ -1535,6 +1536,7 @@ static void bell_voice(int l, int n, float vel, int32_t wait)
     v->note = (uint8_t)n;
     v->loop = (uint8_t)l;
     v->cph = v->mph = 0.0f;
+    v->lp = 0.0f;
     v->cinc = mtof((float)n) * (1.0f / EN_SR);
     /* Phase 5b: the tone a strike takes is the Bell tone knob's, moved by the weather's brightness (the bells brighten
      * and darken with the garden, +-0.12 of the knob's range) and rounder when the garden under them is thin (to
@@ -1583,6 +1585,30 @@ static void bell_voice(int l, int n, float vel, int32_t wait)
         v->idx *= 0.5f;
         v->adec = fm_expf(-6.9f / (t60 * 1.8f * EN_SR));
         v->idec = fm_expf(-6.9f / (1.2f * EN_SR));
+    } else if (btype == 6) {                    /* Bowl: a singing bowl, a slow bloom (about a second) and a very long ring */
+        v->minc = v->cinc * 2.76f;
+        v->idx *= 0.6f;
+        v->adec = fm_expf(-6.9f / (t60 * 2.5f * EN_SR));
+        v->arate = 2.5e-5f;
+        v->amp *= 1.3f;
+    } else if (btype == 7) {                    /* Steel: a steel pan, an octave modulator, struck hard, a short warm ring */
+        v->minc = v->cinc * 2.0f;
+        v->idx *= 1.3f;
+        v->adec = fm_expf(-6.9f / (t60 * 0.6f * EN_SR));
+        v->idec = fm_expf(-6.9f / (0.4f * EN_SR));
+        v->arate *= 3.0f;
+        v->amp *= 1.4f;
+    } else if (btype == 8) {                    /* Beacon: a pure, distant ping, hardly modulated, a long fade */
+        v->minc = v->cinc;
+        v->idx *= 0.15f;
+        v->adec = fm_expf(-6.9f / (t60 * 2.0f * EN_SR));
+    } else if (btype >= 9) {                    /* Saw, Square: a plucked synth note, a hard strike and a short release.
+                                                 * idx is not an FM index here but the filter's opening, and it closes fast */
+        v->idx = 0.25f + 0.75f * tone;
+        v->idec = fm_expf(-6.9f / (0.28f * EN_SR));
+        v->adec = fm_expf(-6.9f / (fm_clampf(0.35f + 0.5f * tone, 0.35f, 0.9f) * EN_SR));
+        v->arate = 1.0f / (0.0015f * EN_SR);
+        v->amp *= 2.5f;
     }
     p = (LOOP_PAN[l] + 1.0f) * (FM_PI / 4.0f);
     v->gl = fm_cosf(p);
@@ -3644,7 +3670,7 @@ static void render_bass(uint32_t n)
 {
     uint32_t j;
     const float g = bass_vol * 0.6f * cd.g[L_BASS], tgt = bass.lin;   /* AMB-1: 0.42 */
-    float ph = bass.ph, ph2 = bass_ph2, amp = bass.amp, inc;
+    float ph = bass.ph, ph2 = bass_ph2, lf = bass_lf, amp = bass.amp, inc;
     if (amp < 1e-5f && tgt <= 0.0f) {
         bass.amp = 0.0f;
         en_bass_level = 0.0f;
@@ -3668,6 +3694,14 @@ static void render_bass(uint32_t n)
         } else if (bass_type == 5) {             /* Reactor: a saw and a square blended, softened, with the octave over it */
             bass_lp += ((0.6f * (2.0f * t - 1.0f) + 0.4f * (t < 0.5f ? 1.0f : -1.0f)) - bass_lp) * lpa;
             x = bass_lp * 0.6f + sine(ph * 0.5f + 0.25f) * 0.4f + sine(ph * 2.0f) * 0.1f;
+        } else if (bass_type == 6) {             /* Hum: drawbars, the fundamental with its second and third over the sub */
+            x = sine(ph) * 0.55f + sine(ph * 2.0f) * 0.22f + sine(ph * 3.0f) * 0.10f + sine(ph * 0.5f + 0.25f) * 0.30f;
+        } else if (bass_type == 7) {             /* Thrum: two saws a few cents apart, softened, over the sub */
+            const float t2 = ph2 - (float)(int)ph2;
+            bass_lp += (((2.0f * t - 1.0f) + (2.0f * t2 - 1.0f)) * 0.5f - bass_lp) * lpa * 0.7f;
+            x = bass_lp * 0.6f + sine(ph * 0.5f + 0.25f) * 0.4f;
+        } else if (bass_type == 8) {             /* Breath: the sine and its sub, swelling and falling slowly, once in about three seconds */
+            x = (sine(ph) * 0.75f + sine(ph * 0.5f + 0.25f) * 0.45f) * (0.55f + 0.45f * sine(lf));
         } else                                   /* Sub: AMB-1's own */
             x = sine(ph) * 0.75f + sine(ph * 0.5f + 0.25f) * 0.45f + sine(ph * 2.0f) * 0.12f;
         ph += inc;
@@ -3676,6 +3710,9 @@ static void render_bass(uint32_t n)
         ph2 += inc * 1.0035f;
         if (ph2 >= 2.0f)
             ph2 -= 2.0f;
+        lf += 0.33f * (1.0f / EN_SR);            /* the Breath's slow swell */
+        if (lf >= 1.0f)
+            lf -= 1.0f;
         amp += (tgt - amp) * 0.002f;             /* the level is already rate-limited: this only smooths */
         x *= amp * g;
         lyl[j] += x;
@@ -3684,6 +3721,7 @@ static void render_bass(uint32_t n)
     }
     bass.ph = ph;
     bass_ph2 = ph2;
+    bass_lf = lf;
     bass.amp = amp;
     en_bass_level = amp;
 }
@@ -3751,9 +3789,16 @@ static void render_bells(uint32_t n)
             v->wait = 0;
         }
         for (; j < n; j++) {
-            float m = sine(mph) * idx, x;
-            float p = cph + m + 4.0f;            /* + 4 turns: positive for the table */
-            x = sine(p) * amp * att * g;
+            float x;
+            if (btype >= 9) {                    /* a saw or a square through a low-pass that closes as it rings */
+                const float w = btype == 9 ? 2.0f * cph - 1.0f : (cph < 0.5f ? 1.0f : -1.0f);
+                v->lp += (w - v->lp) * fm_minf(0.12f + 0.6f * idx * idx, 0.9f);
+                x = v->lp * amp * att * g;
+            } else {
+                float m = sine(mph) * idx;
+                float p = cph + m + 4.0f;        /* + 4 turns: positive for the table */
+                x = sine(p) * amp * att * g;
+            }
             lyl[j] += x * v->gl;
             lyr[j] += x * v->gr;
             rsend[j] += x * 0.7f;
