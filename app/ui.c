@@ -421,22 +421,22 @@ static void midi_in(void)
 #define RESET_HOLD 1500u
 /* SOUNDS: four complete sounds for each of the pad, the bells and the bass (a type with its tone, octave, brightness...),
  * a held page button steps them and its card says which: the layer by the button (ENV, ARP, LFO) */
-static const uint8_t SND_N[3] = {5, 11, 9};          /* how many complete sounds each layer has */
-static const char *const SND_NAME[3][11] = {
+static const uint8_t SND_N[3] = {5, 6, 6};          /* how many complete sounds each layer has */
+static const char *const SND_NAME[3][6] = {
     {"AURORA WASH", "GLASS HALL", "DISTANT ORGAN", "DEEP CHOIR", "BLACK HOLE"},
-    {"STARLIGHT", "SOFT CHIMES", "SONAR", "DRY WOOD", "DEEP GONG", "CRYSTAL", "SINGING BOWL", "STEEL PAN", "BEACON", "SAW PLUCK", "SQUARE PLUCK"},
-    {"DEEP SUB", "HOLLOW TRIANGLE", "SLOW DRONE", "SOFT PULSE", "VOID", "REACTOR", "ORGAN HUM", "THRUM", "BREATH"},
+    {"STARLIGHT", "SOFT CHIMES", "SONAR", "DRY WOOD", "DEEP GONG", "CRYSTAL"},
+    {"DEEP SUB", "HOLLOW TRIANGLE", "SLOW DRONE", "SOFT PULSE", "VOID", "REACTOR"},
 };
-static const char *const SND_DESC[3][11] = {
+static const char *const SND_DESC[3][6] = {
     {"WIDE, WARM SAW WASH", "COLD FM, BELL OVERTONES", "HOLLOW, DARK AND FAR", "SLOW, SUNG VOWELS", "VERY LOW, DARK, HEAVY"},
-    {"HIGH, LONG, GLASSY", "THE CLASSIC BELL", "SHORT, DRY BLIPS", "LOW, QUICK MARIMBA", "DEEP, LONG BLOOM", "HIGH, PURE RING", "SLOW BLOOM, LONG RING", "WARM, BRIGHT, SHORT", "PURE, DISTANT PING", "SHARP, BUZZY, SHORT", "HOLLOW, SHARP, SHORT"},
-    {"PURE, LOW SINE", "ROUND AND HOLLOW", "LOW, SOFT SAW", "SOFT SQUARE", "BEATING, VERY LOW", "SAW AND SQUARE", "WARM LOW DRAWBARS", "SOFT, BUZZING SAWS", "SLOW SWELLING SINE"},
+    {"HIGH, LONG, GLASSY", "THE CLASSIC BELL", "SHORT, DRY BLIPS", "LOW, QUICK MARIMBA", "DEEP, LONG BLOOM", "HIGH, PURE RING"},
+    {"PURE, LOW SINE", "ROUND AND HOLLOW", "LOW, SOFT SAW", "SOFT SQUARE", "BEATING, VERY LOW", "SAW AND SQUARE"},
 };
 static const uint8_t SND_PAR[3][3] = {{P_PADTONE, P_BRIGHT, P_SWELL}, {P_BELLTYPE, P_BTONE, P_BOCT}, {P_BASSTYPE, P_BASSOCT, P_GLIDE}};
-static const int8_t SND_VAL[3][11][3] = {
+static const int8_t SND_VAL[3][6][3] = {
     {{3, 60, 70}, {4, 70, 80}, {5, 25, 85}, {2, 30, 90}, {6, 15, 95}},   /* Aurora, Glass, Hollow, Choir, Abyss; bright, swell */
-    {{1, 70, 1}, {0, 40, 0}, {2, 55, 0}, {3, 30, -1}, {4, 35, -1}, {5, 75, 1}, {6, 40, 0}, {7, 50, 0}, {8, 25, 1}, {9, 60, 0}, {10, 45, 0}},   /* Glass, Chime, Plink, Wood, Gong, Crystal, Bowl, Steel, Beacon, Saw, Square; tone, octave */
-    {{0, 0, 30}, {1, 0, 20}, {2, -1, 50}, {3, 0, 10}, {4, -1, 40}, {5, 0, 15}, {6, 0, 25}, {7, -1, 35}, {8, 0, 45}},   /* Sub, Triangle, Drone, Pulse, Void, Reactor, Hum, Thrum, Breath; octave, glide */
+    {{1, 70, 1}, {0, 40, 0}, {2, 55, 0}, {3, 30, -1}, {4, 35, -1}, {5, 75, 1}},   /* Glass, Chime, Plink, Wood, Gong, Crystal; tone, octave */
+    {{0, 0, 30}, {1, 0, 20}, {2, -1, 50}, {3, 0, 10}, {4, -1, 40}, {5, 0, 15}},   /* Sub, Triangle, Drone, Pulse, Void, Reactor; octave, glide */
 };
 static int snd_layer(int b) { return b == B_ENV ? 0 : b == B_ARP ? 1 : 2; }
 static void cycle_sound(int b)
@@ -1094,24 +1094,16 @@ static int help_lines(int b, const char *l[HELP_LINES])
     case B_ENV:
     case B_ARP:
     case B_LFO: {                                /* held: the sound picked (snd), or what a hold does */
-        static char cnt[3][12];            /* "1 OF 6", "10 OF 11" */
+        static char cnt[3][10];            /* "1 OF 6" */
         const int ly = snd_layer(b), p = ui.snd[ly];
         if (!p) {
             L("PICK A SOUND");
             L("HOLD: THE NEXT ONE");
         } else {
-            {
-                char *c = cnt[ly];
-                if (p >= 10)
-                    *c++ = '1';
-                *c++ = (char)('0' + p % 10);
-                memcpy(c, " OF ", 4);
-                c += 4;
-                if (SND_N[ly] >= 10)
-                    *c++ = '1';
-                *c++ = (char)('0' + SND_N[ly] % 10);
-                *c = 0;
-            }
+            cnt[ly][0] = (char)('0' + p);
+            memcpy(cnt[ly] + 1, " OF ", 4);
+            cnt[ly][5] = (char)('0' + SND_N[ly]);
+            cnt[ly][6] = 0;
             L(SND_NAME[ly][p - 1]);
             L(cnt[ly]);
             L(SND_DESC[ly][p - 1]);
