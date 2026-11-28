@@ -421,20 +421,20 @@ static void midi_in(void)
 #define RESET_HOLD 1500u
 /* SOUNDS: four complete sounds for each of the pad, the bells and the bass (a type with its tone, octave, brightness...),
  * a held page button steps them and its card says which: the layer by the button (ENV, ARP, LFO) */
-static const uint8_t SND_N[3] = {4, 6, 6};          /* how many complete sounds each layer has */
+static const uint8_t SND_N[3] = {5, 6, 6};          /* how many complete sounds each layer has */
 static const char *const SND_NAME[3][6] = {
-    {"AURORA WASH", "GLASS HALL", "DISTANT ORGAN", "DEEP CHOIR"},
+    {"AURORA WASH", "GLASS HALL", "DISTANT ORGAN", "DEEP CHOIR", "BLACK HOLE"},
     {"STARLIGHT", "SOFT CHIMES", "SONAR", "DRY WOOD", "DEEP GONG", "CRYSTAL"},
     {"DEEP SUB", "HOLLOW TRIANGLE", "SLOW DRONE", "SOFT PULSE", "VOID", "REACTOR"},
 };
 static const char *const SND_DESC[3][6] = {
-    {"WIDE, WARM SAW WASH", "COLD FM, BELL OVERTONES", "HOLLOW, DARK AND FAR", "SLOW, SUNG VOWELS"},
+    {"WIDE, WARM SAW WASH", "COLD FM, BELL OVERTONES", "HOLLOW, DARK AND FAR", "SLOW, SUNG VOWELS", "VERY LOW, DARK, HEAVY"},
     {"HIGH, LONG, GLASSY", "THE CLASSIC BELL", "SHORT, DRY BLIPS", "LOW, QUICK MARIMBA", "DEEP, LONG BLOOM", "HIGH, PURE RING"},
     {"PURE, LOW SINE", "ROUND AND HOLLOW", "LOW, SOFT SAW", "SOFT SQUARE", "BEATING, VERY LOW", "SAW AND SQUARE"},
 };
 static const uint8_t SND_PAR[3][3] = {{P_PADTONE, P_BRIGHT, P_SWELL}, {P_BELLTYPE, P_BTONE, P_BOCT}, {P_BASSTYPE, P_BASSOCT, P_GLIDE}};
 static const int8_t SND_VAL[3][6][3] = {
-    {{3, 60, 70}, {4, 70, 80}, {5, 25, 85}, {2, 30, 90}},       /* Aurora, Glass, Hollow, Choir; bright, swell */
+    {{3, 60, 70}, {4, 70, 80}, {5, 25, 85}, {2, 30, 90}, {6, 15, 95}},   /* Aurora, Glass, Hollow, Choir, Abyss; bright, swell */
     {{1, 70, 1}, {0, 40, 0}, {2, 55, 0}, {3, 30, -1}, {4, 35, -1}, {5, 75, 1}},   /* Glass, Chime, Plink, Wood, Gong, Crystal; tone, octave */
     {{0, 0, 30}, {1, 0, 20}, {2, -1, 50}, {3, 0, 10}, {4, -1, 40}, {5, 0, 15}},   /* Sub, Triangle, Drone, Pulse, Void, Reactor; octave, glide */
 };
@@ -878,39 +878,116 @@ static const char *chord_now(char *nm)          /* the chord's name, as the gard
  * into the wedge between one spoke and the next, where it is near one of two axes. One square root a pixel. */
 static int32_t tide_px(void);
 #define WH_RIM 33.0f                            /* the ring of twelve's radius (24 until TESTING #40: "larger") */
-/* the centre: a star. A white-hot core, a warm glow and eight rays (four long, four short) that turn slowly with the drift. */
-static void draw_wheel(float turn, uint16_t c)
+/* the centre: a body that follows the pad's colour (the Colour knob): a star for the Rhodes, Voices and Choir, a nebula for the Aurora, a
+ * neutron star for the Glass, a ring nebula for the Hollow and a black hole for the Abyss. All turn with the drift; tl is the tide's
+ * brightness, 5..16. One or two square roots a pixel, a few more for the nebula's blobs. */
+enum { BODY_STAR, BODY_NEBULA, BODY_NEUTRON, BODY_RING, BODY_HOLE };
+static int body_of(int tone) { return tone == 3 ? BODY_NEBULA : tone == 4 ? BODY_NEUTRON : tone == 5 ? BODY_RING : tone == 6 ? BODY_HOLE : BODY_STAR; }
+
+static float ring_cov(float ru, float rv, float ra, float rb)   /* an ellipse's line, about 1.3 px wide: coverage 0..1 */
 {
-    const float a = turn * (FM_TWO_PI / 8.0f), cs = fm_cosf(a), sn = fm_sinf(a), pr = WH_RIM * 0.26f, gr = WH_RIM * 0.62f;
+    float f = (ru / ra) * (ru / ra) + (rv / rb) * (rv / rb) - 1.0f;
+    float gx = 2.0f * ru / (ra * ra), gy = 2.0f * rv / (rb * rb), g = fm_sqrtf(gx * gx + gy * gy);
+    return g > 0.0f ? fm_clampf(1.15f - fm_fabsf(f) / g, 0.0f, 1.0f) : 0.0f;
+}
+
+static void draw_wheel(float turn, int tl)
+{
+    const int body = body_of(knob_get(P_PADTONE));
+    const float a = turn * (FM_TWO_PI / 8.0f), cs = fm_cosf(a), sn = fm_sinf(a);
+    const uint16_t sun = mix(K_SUN_T, K_SUN, tl);
     int32_t x, y, R = (int32_t)WH_RIM + 2;
     for (y = -R; y <= R; y++)
         for (x = -R; x <= R; x++) {
-            float fx = (float)x, fy = (float)y, d2 = fx * fx + fy * fy, d, u, v, k, cov, g;
+            float fx = (float)x, fy = (float)y, d2 = fx * fx + fy * fy, d, cov, g;
             if (d2 > (WH_RIM + 2.0f) * (WH_RIM + 2.0f))
                 continue;
             d = fm_sqrtf(d2);
-            if (d < gr) {                                                    /* the glow: soft, falling off to nothing */
-                g = 1.0f - d / gr;
-                px_blend(CX + x, CY + y, c, (uint32_t)(g * g * 9.0f + 0.5f));
+            if (body == BODY_STAR) {                                           /* a white-hot core, a warm glow, eight rays */
+                const float pr = WH_RIM * 0.26f, gr = WH_RIM * 0.62f;
+                float u = fm_fabsf(fx * cs + fy * sn), v = fm_fabsf(fy * cs - fx * sn), k;
+                if (d < gr) {
+                    g = 1.0f - d / gr;
+                    px_blend(CX + x, CY + y, sun, (uint32_t)(g * g * 9.0f + 0.5f));
+                }
+                if (v > u) {
+                    k = u;
+                    u = v;
+                    v = k;
+                }
+                cov = 0.0f;
+                if (u > pr * 0.5f && u < WH_RIM * 0.92f)                       /* the long rays, on the axes */
+                    cov = fm_clampf(1.1f * (1.0f - u / (WH_RIM * 0.92f)) - v + 0.5f, 0.0f, 1.0f);
+                k = (u + v) * 0.70710678f;
+                if (k > pr * 0.5f && k < WH_RIM * 0.6f)                        /* the short ones, between */
+                    cov = fm_maxf(cov, 0.8f * fm_clampf(0.9f * (1.0f - k / (WH_RIM * 0.6f)) - fm_fabsf(u - v) * 0.70710678f + 0.5f, 0.0f, 1.0f));
+                if (cov > 0.0f)
+                    px_blend(CX + x, CY + y, sun, (uint32_t)(cov * 16.0f + 0.5f));
+                cov = fm_clampf(pr + 0.5f - d, 0.0f, 1.0f);                    /* the core, white at its middle */
+                if (cov > 0.0f)
+                    px_blend(CX + x, CY + y, mix(K_SUN, K_FROST, (int)(16.0f * (1.0f - d / pr) + 0.5f)), (uint32_t)(cov * 16.0f + 0.5f));
+            } else if (body == BODY_NEBULA) {                                  /* four soft clouds drifting round each other, and a few stars */
+                static const uint16_t NC[4] = {RGB(214, 84, 196), RGB(64, 206, 190), RGB(140, 112, 255), RGB(255, 150, 190)};
+                static const float NR[4] = {0.50f, 0.42f, 0.38f, 0.30f}, NO[4] = {0.30f, 0.34f, 0.26f, 0.12f};
+                int i;
+                for (i = 0; i < 4; i++) {
+                    float ang = a * (0.5f + 0.15f * (float)i) + 1.7f * (float)i, cx = fm_cosf(ang) * NO[i] * WH_RIM, cy = fm_sinf(ang * 1.3f) * NO[i] * WH_RIM * 0.8f;
+                    float dx = fx - cx, dy = fy - cy, rr = NR[i] * WH_RIM;
+                    g = 1.0f - fm_sqrtf(dx * dx + dy * dy) / rr;
+                    if (g > 0.0f)
+                        px_blend(CX + x, CY + y, NC[i], (uint32_t)(g * g * (6.0f + (float)tl * 0.4f) + 0.5f));
+                }
+            } else if (body == BODY_NEUTRON) {                                 /* a tiny, hard blue-white core, a halo, and two beams sweeping round */
+                const float cb = fm_cosf(a * 2.0f), sb = fm_sinf(a * 2.0f);
+                float u = fx * cb + fy * sb, v = fy * cb - fx * sb, au = fm_fabsf(u);
+                if (d < WH_RIM * 0.36f) {
+                    g = 1.0f - d / (WH_RIM * 0.36f);
+                    px_blend(CX + x, CY + y, RGB(110, 160, 255), (uint32_t)(g * g * g * 13.0f + 0.5f));
+                }
+                if (au > 2.5f && au < WH_RIM * 0.97f) {                        /* the beams: narrow, fading outwards, a half-turn apart */
+                    float wd = 1.5f - 0.9f * au / WH_RIM;
+                    cov = fm_clampf(1.1f - fm_fabsf(v) / wd, 0.0f, 1.0f) * (1.0f - au / (WH_RIM * 0.97f));
+                    if (cov > 0.0f)
+                        px_blend(CX + x, CY + y, mix(RGB(120, 190, 255), K_FROST, 8), (uint32_t)(cov * 14.0f + 0.5f));
+                }
+                cov = fm_clampf(2.8f - d, 0.0f, 1.0f);
+                if (cov > 0.0f)
+                    px_blend(CX + x, CY + y, K_FROST, (uint32_t)(cov * 16.0f + 0.5f));
+            } else if (body == BODY_RING) {                                    /* a hollow shell: red outside, green and blue within, a white dwarf in the middle */
+                const float rr = WH_RIM * 0.52f, ru = fx * cs * 0.35f + fx * 0.65f, rv = fy;   /* a little out of round */
+                float dd = fm_sqrtf(ru * ru + rv * rv * 1.2f), t = (dd - rr) / 4.0f;
+                cov = fm_clampf(1.0f - fm_fabsf(t), 0.0f, 1.0f);
+                if (cov > 0.0f) {
+                    float knots = 0.75f + 0.25f * fm_sinf(fx * 0.45f + fy * 0.3f + a * 2.0f);   /* the shell's knots */
+                    px_blend(CX + x, CY + y, mix(RGB(90, 220, 200), RGB(224, 92, 72), (int)(fm_clampf(t * 0.5f + 0.5f, 0.0f, 1.0f) * 16.0f + 0.5f)),
+                             (uint32_t)(cov * cov * knots * (9.0f + (float)tl * 0.45f) + 0.5f));
+                }
+                if (dd < rr) {                                                 /* the haze inside */
+                    g = 1.0f - dd / rr;
+                    px_blend(CX + x, CY + y, RGB(60, 120, 190), (uint32_t)(g * 4.0f + 0.5f));
+                }
+                cov = fm_clampf(2.0f - d, 0.0f, 1.0f);
+                if (cov > 0.0f)
+                    px_blend(CX + x, CY + y, K_FROST, (uint32_t)(cov * 16.0f + 0.5f));
+            } else {                                                           /* a black hole: a tilted disc round a black horizon, a thin bright ring at its edge */
+                const float tilt = -0.28f + 0.06f * sn, ct = fm_cosf(tilt), st = fm_sinf(tilt), hr = WH_RIM * 0.22f, ra = WH_RIM * 0.92f, rb = ra * 0.26f;
+                float ru = fx * ct + fy * st, rv = fy * ct - fx * st, e = fm_sqrtf((ru / ra) * (ru / ra) + (rv / rb) * (rv / rb)), disc = 0.0f;
+                if (e < 1.0f && e > 0.20f)                                     /* the disc: white-yellow inside, red-brown outside, bright on the side coming at us */
+                    disc = fm_clampf((1.0f - e) * 2.2f, 0.0f, 1.0f) * fm_clampf((e - 0.20f) * 8.0f, 0.0f, 1.0f) * (0.6f + 0.4f * ru / ra);
+                if (d < hr + 1.0f && !(disc > 0.0f && rv > 0.0f)) {            /* the horizon covers the far half of the disc and anything behind */
+                    px_blend(CX + x, CY + y, K_BG, (uint32_t)(fm_clampf(hr + 0.5f - d, 0.0f, 1.0f) * 16.0f + 0.5f));
+                } else if (disc > 0.0f) {
+                    px_blend(CX + x, CY + y, mix(RGB(150, 52, 20), RGB(255, 236, 190), (int)(fm_clampf(1.15f - e, 0.0f, 1.0f) * 16.0f + 0.5f)),
+                             (uint32_t)(disc * (13.0f + (float)tl * 0.4f) + 0.5f));
+                }
+                if (d > hr && d < hr * 2.6f) {                                 /* the light bent round it: a faint warm glow */
+                    g = 1.0f - (d - hr) / (hr * 1.6f);
+                    px_blend(CX + x, CY + y, RGB(255, 140, 60), (uint32_t)(g * g * 4.0f + 0.5f));
+                }
+                cov = fm_clampf(1.15f - fm_fabsf(d - hr * 1.28f), 0.0f, 1.0f);   /* the photon ring */
+                if (cov > 0.0f)
+                    px_blend(CX + x, CY + y, RGB(255, 226, 168), (uint32_t)(cov * 0.6f * 16.0f + 0.5f));
             }
-            u = fm_fabsf(fx * cs + fy * sn);
-            v = fm_fabsf(fy * cs - fx * sn);
-            if (v > u) {
-                k = u;
-                u = v;
-                v = k;
-            }
-            cov = 0.0f;
-            if (u > pr * 0.5f && u < WH_RIM * 0.92f)                          /* the long rays, on the axes */
-                cov = fm_clampf(1.1f * (1.0f - u / (WH_RIM * 0.92f)) - v + 0.5f, 0.0f, 1.0f);
-            k = (u + v) * 0.70710678f;
-            if (k > pr * 0.5f && k < WH_RIM * 0.6f)                           /* the short ones, between */
-                cov = fm_maxf(cov, 0.8f * fm_clampf(0.9f * (1.0f - k / (WH_RIM * 0.6f)) - fm_fabsf(u - v) * 0.70710678f + 0.5f, 0.0f, 1.0f));
-            if (cov > 0.0f)
-                px_blend(CX + x, CY + y, c, (uint32_t)(cov * 16.0f + 0.5f));
-            cov = fm_clampf(pr + 0.5f - d, 0.0f, 1.0f);                       /* the core, white at its middle */
-            if (cov > 0.0f)
-                px_blend(CX + x, CY + y, mix(K_SUN, K_FROST, (int)(16.0f * (1.0f - d / pr) + 0.5f)), (uint32_t)(cov * 16.0f + 0.5f));
             px_blend(CX + x, CY + y, K_LINE, (uint32_t)(0.9f * fm_clampf(1.2f - fm_fabsf(d - WH_RIM), 0.0f, 1.0f) * 16.0f + 0.5f));   /* the orbit, under the notes */
         }
 }
@@ -921,7 +998,7 @@ static void draw_ring(void)
     int i, l;
     for (i = 0; i < EN_NPAD; i++)
         chord |= 1u << (en_chord[i] % 12u);
-    draw_wheel(en_drift, mix(K_SUN_T, K_SUN, 5 + 11 * tide_px() / 80));   /* its glow sinks with the tide */
+    draw_wheel(en_drift, 5 + 11 * tide_px() / 80);   /* its glow sinks with the tide */
     for (l = 0; l < EN_NLOOP; l++) {
         int len = EN_LOOP_LEN[l], s, pos = en_loop_pos[l], g = q16(en_loop_glow[l]);
         for (s = 0; s < len; s++) {
