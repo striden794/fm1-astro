@@ -48,7 +48,7 @@ static const en_param_t PARAMS[P_NPARAMS] = {
     {"Echo", 0, 100, 45},     {"Echo time", 0, 5, 3},   {"Reverb", 0, 100, 65},   {"Size", 0, 100, 80},
     {"Bright", 0, 100, 40},   {"Swell", 0, 100, 60},    {"Bell tone", 0, 100, 50}, {"Motion", 0, 100, 50},
     {"Tune", -50, 50, 0},     {"MIDI out", 0, 1, 1},    {"Tempo", 30, 120, 72},   {"Root", 0, 11, 2},
-    {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 5, 0},
+    {"Mode", 0, EN_NMODES - 1, 1}, {"Bell oct", -2, 2, 0}, {"Pad tone", 0, 6, 0},
     {"Bass oct", -1, 1, 0},   {"Glide", 0, 100, 20},    {"Fifth", 0, 100, 35},
     {"Swing", 0, 100, 0},     {"Hats", 0, 100, 50},
     {"Mood", -50, 50, 0},     {"Space", -50, 50, 0},
@@ -129,8 +129,8 @@ void en_param_text(int i, int v, char *b)
         s = ONOFF[v ? 1 : 0];
     else if (i == P_PADTONE)
     {
-        static const char *const PT[6] = {"Rhodes", "Voices", "Choir", "Aurora", "Glass", "Hollow"};
-        s = PT[(unsigned)v < 6u ? v : 0];
+        static const char *const PT[7] = {"Rhodes", "Voices", "Choir", "Aurora", "Glass", "Hollow", "Abyss"};
+        s = PT[(unsigned)v < 7u ? v : 0];
     } else if (i == P_BELLTYPE) {
         static const char *const BT[6] = {"Chime", "Glass", "Plink", "Wood", "Gong", "Crystal"};
         s = BT[(unsigned)v < 6u ? v : 0];
@@ -637,7 +637,7 @@ typedef struct {
     float fc;                                   /* the pad bus's low-pass, octaves from the weather's */
 } anchor_t;
 #define NANCHOR 6
-#define NLAND 5
+#define NLAND 6
 static const anchor_t LAND[NLAND][NANCHOR] = {
     {   /* "Rhodes": AMB-1's Rhodes at the center, its neighbours around it */
         {"Rhodes", 0, 1.0f, 0.50f, 0.50f, 1.0f, 1.0f, 0.12f, 0.0f, 1.0f, 0.45f, 0.0f},
@@ -678,6 +678,14 @@ static const anchor_t LAND[NLAND][NANCHOR] = {
         {"Organ", 0, 2.0f, 0.80f, 0.20f, 0.35f, 0.9f, 0.02f, 0.0f, 1.0f, 0.45f, -0.3f},
         {"Drone", 0, 3.0f, 0.15f, 0.30f, 0.45f, 0.8f, 0.0f, 0.0f, 1.0f, 0.45f, -0.4f},
         {"Void", 0, 3.0f, 0.55f, 0.10f, 0.55f, 1.0f, 0.0f, 0.0f, 1.0f, 0.45f, -0.3f},
+    },
+    {   /* "Abyss": the black hole's: the modulator an octave down or the same, a low index, and the bus pulled dark (-0.6 to -1 octave) */
+        {"Abyss", 0, 0.5f, 0.50f, 0.50f, 0.6f, 0.8f, 0.10f, 0.0f, 1.0f, 0.45f, -0.7f},
+        {"Gravity", 0, 1.0f, 0.85f, 0.70f, 0.9f, 0.8f, 0.05f, 0.0f, 1.0f, 0.45f, -0.8f},
+        {"Tide", 0, 0.5f, 0.20f, 0.85f, 0.5f, 0.7f, 0.15f, 0.0f, 1.0f, 0.45f, -0.9f},
+        {"Pull", 0, 2.0f, 0.80f, 0.20f, 0.7f, 0.9f, 0.0f, 0.0f, 1.0f, 0.45f, -0.6f},
+        {"Shadow", 0, 1.0f, 0.15f, 0.30f, 0.55f, 0.8f, 0.12f, 0.0f, 1.0f, 0.45f, -1.0f},
+        {"Horizon", 0, 0.5f, 0.55f, 0.10f, 0.8f, 0.9f, 0.08f, 0.0f, 1.0f, 0.45f, -0.7f},
     },
 };
 static int pad_land_of(int v) { return v == 1 ? 1 : v >= 3 ? (v - 1 < NLAND ? v - 1 : NLAND - 1) : 0; }   /* the Colour's landscape (2 is the Choir) */
